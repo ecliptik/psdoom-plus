@@ -15,6 +15,7 @@ Repo: https://github.com/ecliptik/psdoom-plus (public, empty as of 2026-11-03).
 | Kill policy | **Two modes** (see "Kill modes"): `classic`, which is faithful to 2000 (`renice +5`, `SIGKILL`, nothing protected, can kill itself), and `modern`, a friendlier mode with protected processes and graceful signals. Audio daemons are *not* protected: killing PipeWire/PulseAudio is fair game |
 | Extra targets | **Local processes only.** No built-in Docker/Podman/Kubernetes backends (dropped 2026-11-03; kubedoom already does pods well). Containers, pods and anything else plug in via the psdoom-ng-compatible `cmd` hooks |
 | GZDoom family | Target **both GZDoom (4.14.x) and UZDoom** with one patch series and two `UPSTREAM` pins (added 2026-11-03) |
+| DOS | **og only**, built with the sdl-dos-ports hub's SDL3-DOS + DJGPP layer, kept **inside psdoom-plus** (`dos/`, hub `shared/` via git subtree, a hub `ports.yaml` entry pointing here). Monsters are **remote host processes** (via `psdoomd` over TCP) **and local TSRs/drivers** (MCB chain) (added 2026-11-03) |
 | Repo access | `pass:hosts/claude/github-release-token` (fine-grained, ecliptik/*, Contents + Workflows RW). Pushes use a one-off credential helper piping from `hpass`, so the token is never written to disk |
 
 ## What psDooM actually is (from `orig/`)
@@ -70,6 +71,7 @@ Repo: https://github.com/ecliptik/psdoom-plus (public, empty as of 2026-11-03).
             |   openbsd (sysctl KERN_PROC)  netbsd (KERN_PROC2)       |
             |   haiku (get_next_team_info, kill, set_thread_priority) |
             |   cmd (psdoom-ng PSDOOM_NG_*_CMD hooks, async)  mock    |
+            |   net (remote psdoomd over TCP)  mcb (DOS TSRs/drivers) |
             +---------------------------------------------------------+
 ```
 
@@ -179,7 +181,7 @@ are GPL-3.0. libpsd is **GPL-2.0-or-later** so it links into all of them.
 
 | Tier | Engine | Upstream | Notes |
 |---|---|---|---|
-| 1 | **og**: linuxdoom-1.10 | doomgeneric (SDL2 backend) | Reference port. The XDoom hunks map nearly 1:1, so this is the first one done |
+| 1 | **og**: linuxdoom-1.10 | doomgeneric (own SDL3 backend; SDL2 fallback) | Reference port. The XDoom hunks map nearly 1:1, so this is the first one done. One SDL3 backend for every platform, so DOS is not a special case; SDL2 only where a platform lacks SDL3 |
 | 1 | **Chocolate Doom** 3.1.x | chocolate-doom/chocolate-doom | Use the psdoom-ng1 hook sites as a map |
 | 1 | **Crispy Doom** 7.x | fabiangreffrath/crispy-doom | Shares most of Chocolate's code, so it is mostly the same series |
 | 1 | **GZDoom** 4.14.x and **UZDoom** | ZDoom/gzdoom, UZDoom/UZDoom | Both targeted: one patch series, two pins. C++ native bindings (list/wound/kill/inspect) + ZScript `PidMonster` actors, an EventHandler poll and HUD inspect in a shared `psdoom.pk3` |
@@ -196,6 +198,7 @@ are GPL-3.0. libpsd is **GPL-2.0-or-later** so it links into all of them.
 | NetBSD 11.0 | `sysctl KERN_PROC2` / `kinfo_proc2` | `tv-netbsd` .14 |
 | Haiku R1/beta6 | `get_next_team_info`; `kill()`; nice → `set_thread_priority` per thread (verify) | `tv-haiku` .15 |
 | macOS (bonus, untested) | `libproc` | none |
+| MS-DOS 6.22 / FreeDOS (og only) | `net` (remote psdoomd) and `mcb` (local TSRs/drivers) | DOSBox-X first, then the hub's vcctrl real-hardware rigs (486/Pentium) |
 
 All Tier-1 engines already build on these platforms through SDL2; Haiku has HaikuPorts recipes for
 Chocolate, Crispy and GZDoom.
@@ -237,13 +240,49 @@ The existing clean-install **testvm** guests on jezebel are used. No new VMs nee
 CI (later): GitHub Actions Linux runs the unit tests plus mock-backend engine builds. BSD runs use
 vmactions, as a second check on top of the jezebel guests.
 
+## DOS
+
+SDL2 is a dead end on DOS (`sdl2-compat` needs a dynamic loader; DJGPP's `dlopen` returns NULL,
+see the hub's `shared/patches/sdl2-compat-notes/`). The hub's proven path is **SDL3-DOS + DJGPP +
+CWSDPMI**, which is why og gets its own SDL3 backend. Chocolate/Crispy (a full SDL2→SDL3
+migration including mixer/net), GZDoom/UZDoom and the Quake engines (GL, memory) are out of scope
+on DOS.
+
+**Where it lives:** `dos/` in this repo, with the hub's `shared/` layer pulled in by git subtree at
+`.sdl-dos-ports/`, the hub's conventions (patch naming, DJGPP constraints, emulator → real-hardware
+tiering), and a `ports.yaml` entry in the hub pointing here. That claim is made with `/sdldos:port`
+when the phase starts, not before.
+
+DOS has no processes, so the DOS build has two monster sources:
+
+- **`net`: remote processes.** A small `psdoomd` runs on a Linux/BSD/Haiku host (built from libpsd,
+  so it gets the host's native backend and kill modes) and serves a line protocol over TCP:
+  `LIST` returns `<user> <pid> <name> <is_daemon>` lines (psdoom-ng's hook format) ending in
+  `.`, and `RENICE <pid>`/`KILL <pid>` act on them. The DOS side uses a packet driver + Watt-32. A
+  real 486 can then shoot processes on a server. `psdoomd` requires a shared token, binds only to
+  an address given explicitly, and is tested only between test guests. Every other engine gets the
+  `net` backend for free.
+- **`mcb`: local TSRs and drivers.** Walk the DOS memory chain (INT 21h AH=52h "List of Lists" →
+  first MCB, plus the UMB chain and DOS 4+ device-driver sub-blocks) through DPMI. Device drivers
+  (HIMEM, EMM386, …) are Demons, resident programs are Shotgun guys, and the label is the MCB owner
+  name. *Wound* has no DOS equivalent and only shows a message. *Kill* frees the block:
+  - `classic`: free it regardless. If it hooked interrupts, the PC hangs on the next interrupt.
+    That is the authentic experience.
+  - `modern`: protect our own PSP, the parent `COMMAND.COM` and CWSDPMI (our DPMI host). Blocks
+    that interrupt vectors still point into are shown as invulnerable; only blocks nothing points
+    into can be freed.
+
+**Testing:** DOSBox-X first (its NE2000 + slirp networking covers `net` against `psdoomd` in a
+tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following the hub's
+`/sdldos:*` skills (emulator numbers are never performance results).
+
 ## Phases
 
 0. **Bootstrap**: git repo → `ecliptik/psdoom-plus`; import `orig/` as reference (original tarballs
    plus the reconstructed 2000.05.03.b tree); README, LICENSE, `tools/psdev` skeleton; vault project card.
 1. **libpsd core**: API, diff/resurrect logic ported from `pr_process.c`, Linux + mock + cmd
    (psdoom-ng env vars) backends, unit tests. *Exit:* unit tests green on tv-debian.
-2. **og (linuxdoom via doomgeneric)**: port the ~60 hunks onto libpsd, SDL2, PSDBOXES, psdoom1/2.wad,
+2. **og (linuxdoom via doomgeneric)**: port the ~60 hunks onto libpsd, own SDL3 backend, PSDBOXES, psdoom1/2.wad,
    `-pstest`. *Exit:* on tv-debian, shooting a `sleep` monster kills the process (screenshot taken).
 3. **BSD + Haiku backends**: freebsd/openbsd/netbsd/haiku. *Exit:* unit tests + og `-pstest` green on all
    five guests.
@@ -253,14 +292,17 @@ vmactions, as a second check on top of the jezebel guests.
 6. **Hook interop**: the `cmd` backend proven against psdoom-ng1's documented protocol, plus example
    helpers in `contrib/` (`docker ps`, `kubectl get pods`) as samples, not supported backends.
    *Exit:* og and Chocolate drive a fake helper and a slow helper without frame hitches.
-7. **Tier 2 engines**: DSDA-Doom, Woof!.
-8. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
+7. **DOS (og)**: the SDL3 backend under DJGPP via the hub's `shared/` layer, the `mcb` backend, then
+   `psdoomd` + the `net` backend. *Exit:* in DOSBox-X, shooting a TSR frees it and shooting a remote
+   monster kills a `sleep` in a tv-\* guest; then the same on a real-hardware rig.
+8. **Tier 2 engines**: DSDA-Doom, Woof!.
+9. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
    builtins, plus a QuakeC mod (`psquake`) that spawns grunts/enforcers for processes and shamblers
    for daemons. Test assets: the shareware pak0 or LibreQuake.
-9. **Stretch: Quake 3**: no engine patch. A native `qagame` mod for ioquake3/Quake3e (`vm_game 0`)
+10. **Stretch: Quake 3**: no engine patch. A native `qagame` mod for ioquake3/Quake3e (`vm_game 0`)
    links libpsd, and processes become bots named `pid:comm` (Q3 has no monsters). First hit renices,
    a frag kills. Test assets: OpenArena (free), on a custom arena with AAS.
-10. **Release**: tagged source releases; optionally a kubedoom-compatible image built on
+11. **Release**: tagged source releases; optionally a kubedoom-compatible image built on
     psdoom-plus (offered upstream to kubedoom rather than as a rival); packaging (AUR, FreeBSD port, HaikuPorts recipe) as
     follow-up.
 

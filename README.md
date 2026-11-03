@@ -14,7 +14,8 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | DSDA-Doom, Woof! | planned |
 | Quake, Quake 3 (stretch) | planned |
 
-Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku. Anything else (containers, pods,
+Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for the og engine
+(remote processes over the network, or local TSRs and drivers as monsters). Anything else (containers, pods,
 cloud apps) can plug in through psdoom-ng's `PSDOOM_NG_*_CMD` hooks, so kubedoom-style helpers
 work unchanged.
 
