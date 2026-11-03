@@ -26,8 +26,9 @@ list(REMOVE_ITEM OG_C ${OG_SRC}/i_video.c)      # X11: replaced by platform/i_vi
 add_executable(psdoom-og ${OG_C}
     platform/i_video_sdl.c
     platform/i_audio_sdl.c
-    psdoom/p_psdoom.c)
-target_include_directories(psdoom-og PRIVATE ${OG_SRC} platform psdoom)
+    ../common/psdoom/p_psdoom.c
+    psdoom/ps_engine.c)
+target_include_directories(psdoom-og PRIVATE ${OG_SRC} platform psdoom ../common/psdoom)
 target_link_libraries(psdoom-og PRIVATE psd SDL3::SDL3 m)
 if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
     target_link_libraries(psdoom-og PRIVATE network)   # sockets for i_net.c

@@ -31,8 +31,8 @@ usage: $PROG <command> [args]
   build <engine>                build into build/<engine>
   test unit [--vm <os>]         build libpsd and run its unit tests, here or in a guest
                                 (the guest gets a fresh copy of the tree and its deps)
-  test og --vm <os>             build og in a guest and shoot real processes there
-                                (tests/vm/og-pstest.sh; screenshots in tests/out/<os>/)
+  test <engine> --vm <os>       build an engine in a guest and shoot real processes there
+                                (tests/vm/doom-pstest.sh; results in tests/out/<os>/<engine>/)
 
 Real kill/renice runs only inside the test guests, never on a machine you use.
 EOF
@@ -126,7 +126,8 @@ cmd_build() {
 	engine_ok "$e"
 	[ -d "$ROOT/engines/$e/src" ] || cmd_fetch "$e"
 	cmake -S "$ROOT/engines/$e" -B "$ROOT/build/$e" >/dev/null
-	cmake --build "$ROOT/build/$e" -j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+	cmake --build "$ROOT/build/$e" --target "$(upstream "$e" target)" \
+		-j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 }
 
 engine_vm() {
@@ -139,7 +140,7 @@ engine_vm() {
 	echo "== bootstrap + build $e on tv-$os"
 	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/bootstrap.sh engines &&
 		cmake -S engines/$e -B build/$e >/dev/null &&
-		cmake --build build/$e -j2 2>&1 | grep -E 'error|warning: implicit' ; test -x build/$e/psdoom-$e" ||
+		cmake --build build/$e --target $(upstream "$e" target) -j2 2>&1 | grep -E 'error|warning: implicit' ; test -x build/$e/psdoom-$e" ||
 		die "build failed on tv-$os"
 	iwad=$(ssh "tv-$os" 'for f in /usr/share/games/doom/freedoom1.wad /usr/local/share/games/doom/freedoom1.wad /usr/local/share/doom/freedoom1.wad "$HOME/freedoom1.wad"; do [ -r "$f" ] && echo "$f" && break; done; true')
 	if [ -z "$iwad" ]; then
@@ -148,11 +149,11 @@ engine_vm() {
 		iwad='$HOME/freedoom1.wad'      # expanded by the guest's shell
 	fi
 	echo "== $e end-to-end on tv-$os (real signals, inside the guest)"
-	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/$e-pstest.sh build/$e/psdoom-$e \"$iwad\" tests/out"
+	ssh "tv-$os" "cd psdoom-plus && rm -rf tests/out && sh tests/vm/doom-pstest.sh build/$e/psdoom-$e \"$iwad\" tests/out"
 	rc=$?
-	mkdir -p "$ROOT/tests/out/$os"
-	scp -q "tv-$os:psdoom-plus/tests/out/*" "$ROOT/tests/out/$os/" 2>/dev/null
-	for f in "$ROOT/tests/out/$os/"*.ppm; do
+	mkdir -p "$ROOT/tests/out/$os/$e"
+	scp -q "tv-$os:psdoom-plus/tests/out/*" "$ROOT/tests/out/$os/$e/" 2>/dev/null
+	for f in "$ROOT/tests/out/$os/$e/"*.ppm; do
 		[ -f "$f" ] && command -v convert >/dev/null && convert "$f" -scale 200% "${f%.ppm}.png"
 	done
 	return $rc

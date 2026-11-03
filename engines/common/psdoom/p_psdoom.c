@@ -16,10 +16,7 @@
 
 #include "doomdef.h"
 #include "doomstat.h"
-#include "d_main.h"
 #include "i_system.h"
-#include "i_video.h"
-#include "i_sound.h"
 #include "m_argv.h"
 #include "m_random.h"
 #include "p_local.h"
@@ -27,13 +24,11 @@
 #include "r_main.h"
 #include "info.h"
 
-#include "i_platform.h"
 #include "p_psdoom.h"
+#include "ps_engine.h"
 #include "psd.h"
 
 void	P_KillMobj (mobj_t* source, mobj_t* target);	// p_inter.c
-void	M_WriteText (int x, int y, char* string);		// m_menu.c
-void	M_StartMessage (char* string, void* routine, boolean input);
 
 boolean	ps_level_loaded;
 boolean	respawnitems;
@@ -108,7 +103,8 @@ static boolean level_qualifies (void)
 	return false;
     if (gamemap != 1)
 	return false;
-    return gamemode == commercial || gameepisode == 1;
+    // psDooM: E1M1 or MAP01, but not TNT's or Plutonia's MAP01
+    return gamemode == commercial ? PSE_IsDoom2 () : gameepisode == 1;
 }
 
 static psd_level level_kind (void)
@@ -297,13 +293,13 @@ void PS_AddCustomLevel (void)
     if (M_CheckParm ("-nopslev") || M_CheckParm ("-nopsmon"))
 	return;
     // psdoom1.wad replaces E1M1 (registered/retail), psdoom2.wad MAP01
-    if (gamemode == registered || gamemode == retail)
+    if (PSE_IsDoom1 ())
 	wad = find_data ("psdoom1.wad");
-    else if (gamemode == commercial)
+    else if (PSE_IsDoom2 ())
 	wad = find_data ("psdoom2.wad");
     if (wad)
     {
-	D_AddFile (strdup (wad));
+	PSE_AddWad (wad);
 	ps_level_loaded = true;
     }
 }
@@ -389,15 +385,14 @@ void PS_SaveLoaded (void)
 static void test_finish (int code)
 {
     if (test_shot)
-	I_WriteScreenshotPPM (test_shot);
+	PSE_Screenshot (test_shot);
     printf ("PSTEST mode=%s targeted=%d removed=%d result=%s\n",
 	    psd_mode_of (ctx) == PSD_MODE_CLASSIC ? "classic" : "modern",
 	    test_ntargets, test_nremoved, code == 0 ? "ok" : "fail");
     fflush (stdout);
     psd_close (ctx);
     ctx = NULL;
-    I_ShutdownSound ();
-    I_ShutdownGraphics ();
+    PSE_Shutdown ();
     exit (code);
 }
 
@@ -534,7 +529,7 @@ void PS_Killed (mobj_t* source, mobj_t* target)
 	confirm_pid = p->pid;
 	snprintf (q, sizeof q, "kill root process %ld\n%s?\n\npress y or n.",
 		  p->pid, p->label);
-	M_StartMessage (q, confirm_kill, true);
+	PSE_StartMessage (q, confirm_kill);
 	return;			// if not confirmed, it rises again next poll
     }
 
@@ -571,26 +566,4 @@ void PS_MobjRemoved (mobj_t* mobj)
 boolean PS_SkipSave (mobj_t* mobj)
 {
     return mobj->ps_pid != 0;
-}
-
-// ------------------------------------------------------------------
-// labels: psDooM drew the pid and the last 7 chars of the name above
-// each pid monster, when it was near enough and not at the screen edge
-
-void PS_DrawLabel (long pid, const char* label, int x1, int x2, int top, int scale)
-{
-    char	buf[16];
-    int		x = viewwindowx + (x1 << detailshift);
-
-    (void)x2;
-    if (scale <= 18000 || (x1 << detailshift) <= SCREENWIDTH / 8
-	|| (x2 << detailshift) >= SCREENWIDTH * 7 / 8)
-	return;
-    if (top + 13 > viewheight)
-	top = viewheight - 13;
-    if (top < 0)
-	top = 0;
-    snprintf (buf, sizeof buf, "%ld", pid);
-    M_WriteText (x, viewwindowy + top, buf);
-    M_WriteText (x, viewwindowy + top + 6, (char*)label);
 }

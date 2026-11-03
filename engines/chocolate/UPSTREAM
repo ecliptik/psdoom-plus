@@ -1,0 +1,5 @@
+url=https://github.com/chocolate-doom/chocolate-doom.git
+commit=410d96855b5df5410ff591a90efeafa889119224
+tag=chocolate-doom-3.1.1
+target=chocolate-doom
+license=GPL-2.0 (COPYING.md)

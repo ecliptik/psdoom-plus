@@ -1,0 +1,5 @@
+url=https://github.com/fabiangreffrath/crispy-doom.git
+commit=fdeabe4c23a833534b70aa84a22f1685aae7125d
+tag=crispy-doom-7.2
+target=crispy-doom
+license=GPL-2.0 (COPYING.md)

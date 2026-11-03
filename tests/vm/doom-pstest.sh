@@ -1,7 +1,7 @@
 #!/bin/sh
-# og-pstest.sh - end-to-end psDooM check for the og engine, with REAL signals
+# doom-pstest.sh - end-to-end psDooM check for a Doom engine, with REAL signals
 #
-#   og-pstest.sh <psdoom-og> <iwad> <outdir>
+#   doom-pstest.sh <psdoom-binary> <iwad> <outdir>
 #
 # Only run this inside a disposable test guest. It starts sacrificial
 # processes, lets the game shoot them through its normal damage path

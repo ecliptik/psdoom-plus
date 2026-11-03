@@ -17,7 +17,7 @@ have_all() {
 	need cmake && need cc || return 1
 	[ $want_engines -eq 0 ] && return 0
 	need pkg-config || need pkgconf || return 1
-	pkg-config --exists sdl3 2>/dev/null
+	pkg-config --exists sdl3 sdl2 2>/dev/null
 }
 
 if have_all; then
@@ -29,19 +29,19 @@ os=$(uname -s)
 case $os in
 Linux)
 	pkgs="build-essential cmake"
-	[ $want_engines -eq 1 ] && pkgs="$pkgs pkg-config libsdl3-dev freedoom"
+	[ $want_engines -eq 1 ] && pkgs="$pkgs pkg-config libsdl3-dev libsdl2-dev freedoom"
 	sudo apt-get update -qq
 	# shellcheck disable=SC2086
 	sudo apt-get install -y -qq $pkgs >/dev/null ;;
 FreeBSD)
 	pkgs="cmake"
-	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf sdl3"
+	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf sdl3 sdl2"
 	# shellcheck disable=SC2086
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
 	pkgs="cmake"
 	if [ $want_engines -eq 1 ]; then
-		pkgs="$pkgs sdl3"
+		pkgs="$pkgs sdl3 sdl2"
 		# SDL3 links against xcb from the X11 base set, which a minimal
 		# install leaves out: add the xbase set (disposable guests only)
 		if ! ls /usr/X11R6/lib/libxcb.so.* >/dev/null 2>&1; then
@@ -58,14 +58,14 @@ OpenBSD)
 	doas pkg_add -I $pkgs ;;
 NetBSD)
 	pkgs="cmake"
-	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf SDL3"
+	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf SDL3 SDL2"
 	# no pkgin in a minimal install: pkg_add from the binary package repo
 	repo="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -m)/$(uname -r | cut -d_ -f1)/All"
 	# shellcheck disable=SC2086
 	sudo env PKG_PATH="$repo" /usr/sbin/pkg_add -U $pkgs ;;
 Haiku)
 	pkgs="cmake"
-	[ $want_engines -eq 1 ] && pkgs="$pkgs libsdl3_devel"
+	[ $want_engines -eq 1 ] && pkgs="$pkgs libsdl3_devel libsdl2_devel"
 	# shellcheck disable=SC2086
 	pkgman install -y $pkgs ;;
 *)

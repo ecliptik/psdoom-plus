@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 15:50:48 -0800
+Subject: [PATCH 1/2] Build without SDL2_mixer
+
+i_sound.c only got SDL.h and string.h through SDL_mixer.h, so
+-DENABLE_SDL2_MIXER=OFF failed (SDL_GetCurrentAudioDriver, memcmp).
+---
+ src/i_sound.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/i_sound.c b/src/i_sound.c
+index 443ce4d1..f939cc11 100644
+--- a/src/i_sound.c
++++ b/src/i_sound.c
+@@ -17,6 +17,9 @@
+ 
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <string.h>
++
++#include "SDL.h"	// psdoom-plus: also needed without SDL2_mixer
+ 
+ #include "config.h"
+ #include "doomtype.h"

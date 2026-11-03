@@ -34,9 +34,10 @@ boolean	PS_NoDrop (struct mobj_s* target);	// skip the item drop
 void	PS_MobjRemoved (struct mobj_s* mobj);
 boolean	PS_SkipSave (struct mobj_s* mobj);	// pid monsters aren't saved
 
-// floating pid/name labels (r_things.c)
+// floating pid/name labels (r_things.c); drawn by PSE_DrawLabel
 extern boolean	ps_col_drawn;
 extern int	ps_col_top;
-void	PS_DrawLabel (long pid, const char* label, int x1, int x2, int top, int scale);
+#define PS_DrawLabel PSE_DrawLabel
+#include "ps_engine.h"
 
 #endif
