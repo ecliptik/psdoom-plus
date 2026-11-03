@@ -1,0 +1,213 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 15:07:07 -0800
+Subject: [PATCH 3/5] Platform layer: SDL3 audio, no busy wait, bigger zone
+
+- i_sound.c: keep id's software mixer, but hand the 11025 Hz 16-bit
+  stereo buffers to the platform layer (SDL3) instead of OSS /dev/dsp.
+  Mix on demand while fewer than two buffers are queued, so audio is
+  paced by the device instead of throttling the game. -nosound works.
+- i_sound.c: linked sfx used a pointer difference divided by the struct
+  size a second time.
+- doomdef.h: no external sndserver; mix in-process.
+- d_net.c: TryRunTics yields instead of spinning at 100% CPU.
+- i_system.c: 32 MB zone for modern IWADs and PWADs.
+---
+ linuxdoom-1.10/d_net.c    |  2 +
+ linuxdoom-1.10/doomdef.h  |  3 +-
+ linuxdoom-1.10/i_sound.c  | 79 +++++++++++++--------------------------
+ linuxdoom-1.10/i_system.c |  2 +-
+ 4 files changed, 31 insertions(+), 55 deletions(-)
+
+diff --git a/linuxdoom-1.10/d_net.c b/linuxdoom-1.10/d_net.c
+index 98d3ca8..836b657 100644
+--- a/linuxdoom-1.10/d_net.c
++++ b/linuxdoom-1.10/d_net.c
+@@ -28,6 +28,7 @@ static const char rcsid[] = "$Id: d_net.c,v 1.3 1997/02/03 22:01:47 b1 Exp $";
+ 
+ #include "m_menu.h"
+ #include "i_system.h"
++#include "i_platform.h"
+ #include "i_video.h"
+ #include "i_net.h"
+ #include "g_game.h"
+@@ -730,6 +731,7 @@ void TryRunTics (void)
+ 	    M_Ticker ();
+ 	    return;
+ 	} 
++	I_Yield ();	// psdoom-plus: don't spin at 100% CPU
+     }
+     
+     // run the count * ticdup dics
+diff --git a/linuxdoom-1.10/doomdef.h b/linuxdoom-1.10/doomdef.h
+index 1850477..591fbd1 100644
+--- a/linuxdoom-1.10/doomdef.h
++++ b/linuxdoom-1.10/doomdef.h
+@@ -81,7 +81,8 @@ typedef enum
+ //  and unfinished. Default is synchronous.
+ // Experimental asynchronous timer based is
+ //  handled by SNDINTR. 
+-#define SNDSERV  1
++// psdoom-plus: mix in-process through the platform audio layer
++//#define SNDSERV  1
+ //#define SNDINTR  1
+ 
+ 
+diff --git a/linuxdoom-1.10/i_sound.c b/linuxdoom-1.10/i_sound.c
+index a327bfa..f6c0a1e 100644
+--- a/linuxdoom-1.10/i_sound.c
++++ b/linuxdoom-1.10/i_sound.c
+@@ -33,16 +33,11 @@ rcsid[] = "$Id: i_unix.c,v 1.5 1997/02/03 22:45:10 b1 Exp $";
+ #include <sys/time.h>
+ #include <sys/types.h>
+ 
+-#ifndef LINUX
+-#include <sys/filio.h>
+-#endif
+-
+ #include <fcntl.h>
+ #include <unistd.h>
+-#include <sys/ioctl.h>
+ 
+-// Linux voxware output.
+-#include <linux/soundcard.h>
++// psdoom-plus: output goes through the platform layer (SDL3), not /dev/dsp
++#include "i_platform.h"
+ 
+ // Timer stuff. Experimental.
+ #include <time.h>
+@@ -103,7 +98,7 @@ static int flag = 0;
+ int 		lengths[NUMSFX];
+ 
+ // The actual output device.
+-int	audio_fd;
++int	audio_fd = -1;
+ 
+ // The global mixing buffer.
+ // Basically, samples from all active internal channels
+@@ -156,23 +151,7 @@ int*		channelrightvol_lookup[NUM_CHANNELS];
+ //
+ // Safe ioctl, convenience.
+ //
+-void
+-myioctl
+-( int	fd,
+-  int	command,
+-  int*	arg )
+-{   
+-    int		rc;
+-    extern int	errno;
+-    
+-    rc = ioctl(fd, command, arg);  
+-    if (rc < 0)
+-    {
+-	fprintf(stderr, "ioctl(dsp,%d,arg) failed\n", command);
+-	fprintf(stderr, "errno=%d\n", errno);
+-	exit(-1);
+-    }
+-}
++// (myioctl removed: no OSS ioctls with the platform audio layer)
+ 
+ 
+ 
+@@ -536,7 +515,7 @@ int I_SoundIsPlaying(int handle)
+ //
+ // This function currently supports only 16bit.
+ //
+-void I_UpdateSound( void )
++static void I_MixSound( void )
+ {
+ #ifdef SNDINTR
+   // Debug. Count buffer misses with interrupt.
+@@ -662,11 +641,24 @@ void I_UpdateSound( void )
+ // Mixing now done synchronous, and
+ //  only output be done asynchronous?
+ //
++void I_UpdateSound( void )
++{
++  // Mixed on demand in I_SubmitSound, paced by the audio device.
++}
++
+ void
+ I_SubmitSound(void)
+ {
+-  // Write it to DSP device.
+-  write(audio_fd, mixbuffer, SAMPLECOUNT*BUFMUL);
++  // Keep about two mix buffers queued; never run ahead of the device
++  // (the old blocking write() to /dev/dsp throttled the whole game).
++  int guard = 8;
++
++  while (audio_fd >= 0 && guard-- > 0
++         && I_AudioQueued() < 2*SAMPLECOUNT*BUFMUL)
++  {
++    I_MixSound();
++    I_AudioWrite(mixbuffer, SAMPLECOUNT*BUFMUL);
++  }
+ }
+ 
+ 
+@@ -721,8 +713,9 @@ void I_ShutdownSound(void)
+   I_SoundDelTimer();
+ #endif
+   
+-  // Cleaning up -releasing the DSP device.
+-  close ( audio_fd );
++  // Cleaning up -releasing the audio device.
++  I_AudioClose();
++  audio_fd = -1;
+ #endif
+ 
+   // Done.
+@@ -767,28 +760,8 @@ I_InitSound()
+   // Secure and configure sound device first.
+   fprintf( stderr, "I_InitSound: ");
+   
+-  audio_fd = open("/dev/dsp", O_WRONLY);
+-  if (audio_fd<0)
+-    fprintf(stderr, "Could not open /dev/dsp\n");
+-  
+-                     
+-  i = 11 | (2<<16);                                           
+-  myioctl(audio_fd, SNDCTL_DSP_SETFRAGMENT, &i);
+-  myioctl(audio_fd, SNDCTL_DSP_RESET, 0);
+-  
+-  i=SAMPLERATE;
+-  
+-  myioctl(audio_fd, SNDCTL_DSP_SPEED, &i);
+-  
+-  i=1;
+-  myioctl(audio_fd, SNDCTL_DSP_STEREO, &i);
+-  
+-  myioctl(audio_fd, SNDCTL_DSP_GETFMTS, &i);
+-  
+-  if (i&=AFMT_S16_LE)    
+-    myioctl(audio_fd, SNDCTL_DSP_SETFMT, &i);
+-  else
+-    fprintf(stderr, "Could not play signed 16 data\n");
++  // 11025 Hz, signed 16-bit stereo, as the OSS code asked for
++  audio_fd = M_CheckParm("-nosound") ? -1 : I_AudioOpen(SAMPLERATE);
+ 
+   fprintf(stderr, " configured audio device\n" );
+ 
+@@ -808,7 +781,7 @@ I_InitSound()
+     {
+       // Previously loaded already?
+       S_sfx[i].data = S_sfx[i].link->data;
+-      lengths[i] = lengths[(S_sfx[i].link - S_sfx)/sizeof(sfxinfo_t)];
++      lengths[i] = lengths[S_sfx[i].link - S_sfx];
+     }
+   }
+ 
+diff --git a/linuxdoom-1.10/i_system.c b/linuxdoom-1.10/i_system.c
+index 1b67d51..46749d2 100644
+--- a/linuxdoom-1.10/i_system.c
++++ b/linuxdoom-1.10/i_system.c
+@@ -48,7 +48,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
+ 
+ 
+ 
+-int	mb_used = 6;
++int	mb_used = 32;	// psdoom-plus: room for modern IWADs/PWADs
+ 
+ 
+ void

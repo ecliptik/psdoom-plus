@@ -181,7 +181,7 @@ are GPL-3.0. libpsd is **GPL-2.0-or-later** so it links into all of them.
 
 | Tier | Engine | Upstream | Notes |
 |---|---|---|---|
-| 1 | **og**: linuxdoom-1.10 | doomgeneric (own SDL3 backend; SDL2 fallback) | Reference port. The XDoom hunks map nearly 1:1, so this is the first one done. One SDL3 backend for every platform, so DOS is not a special case; SDL2 only where a platform lacks SDL3 |
+| 1 | **og**: linuxdoom-1.10 | `id-Software/DOOM` @ `a77dfb9` + own SDL3 layer (`engines/og/platform/`) | Reference port. Not doomgeneric: that is Chocolate-derived (corrected 2026-11-03). The XDoom hunks map nearly 1:1. One SDL3 layer for every platform, so DOS is not a special case |
 | 1 | **Chocolate Doom** 3.1.x | chocolate-doom/chocolate-doom | Use the psdoom-ng1 hook sites as a map |
 | 1 | **Crispy Doom** 7.x | fabiangreffrath/crispy-doom | Shares most of Chocolate's code, so it is mostly the same series |
 | 1 | **GZDoom** 4.14.x and **UZDoom** | ZDoom/gzdoom, UZDoom/UZDoom | Both targeted: one patch series, two pins. C++ native bindings (list/wound/kill/inspect) + ZScript `PidMonster` actors, an EventHandler poll and HUD inspect in a shared `psdoom.pk3` |
@@ -283,8 +283,11 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    plus the reconstructed 2000.05.03.b tree); README, LICENSE, `tools/psdev` skeleton; vault project card.
 1. ✅ **libpsd core** (2026-11-03): API, diff/resurrect logic ported from `pr_process.c`, Linux + mock + cmd
    (psdoom-ng env vars) backends, unit tests. *Exit:* unit tests green on tv-debian.
-2. **og (linuxdoom via doomgeneric)**: port the ~60 hunks onto libpsd, own SDL3 backend, PSDBOXES, psdoom1/2.wad,
-   `-pstest`. *Exit:* on tv-debian, shooting a `sleep` monster kills the process (screenshot taken).
+2. ✅ **og (id's linuxdoom-1.10)** (2026-11-03): 64-bit fixes, SDL3 video/audio, `-iwad` + Freedoom, XDG paths,
+   psDooM's hooks on libpsd (`engines/og/patches/`, glue in `engines/og/psdoom/`), psdoom1/2.wad,
+   `-pstest`/`-pstestview`. *Exit met:* `tools/psdev test og --vm debian`: 8/8 with real signals
+   (classic SIGKILL, modern TERM→KILL, protected decoy untouched, audit log), screenshots taken.
+   PSDBOXES lumps moved to the "any map" work.
 3. **BSD + Haiku backends**: freebsd/openbsd/netbsd/haiku. *Exit:* unit tests + og `-pstest` green on all
    five guests.
 4. **Chocolate + Crispy**: shared patch series. *Exit:* `-pstest` green on all five guests.

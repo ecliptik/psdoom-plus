@@ -25,10 +25,14 @@ usage: $PROG <command> [args]
                                 control a test guest (os: ${PSD_VM_OSES})
   vm ssh <os> [command...]      shell / command in a running guest
 
-  fetch <engine>                fetch an upstream engine at its pinned tag   (phase 2+)
-  build <engine>                apply patches and build                      (phase 2+)
+  fetch <engine> [--force]      clone the pinned upstream into engines/<engine>/src
+                                and apply engines/<engine>/patches (branch psdoom-plus)
+  export <engine>               rewrite engines/<engine>/patches from that branch
+  build <engine>                build into build/<engine>
   test unit [--vm <os>]         build libpsd and run its unit tests, here or in a guest
                                 (the guest gets a fresh copy of the tree and its deps)
+  test og --vm <os>             build og in a guest and shoot real processes there
+                                (tests/vm/og-pstest.sh; screenshots in tests/out/<os>/)
 
 Real kill/renice runs only inside the test guests, never on a machine you use.
 EOF
@@ -66,10 +70,92 @@ not_yet() { die "'$1' is not implemented yet (see PLAN.md, phases)"; }
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-# Files a guest needs: tracked + untracked-but-not-ignored, minus history.
+# Files a guest needs: tracked + untracked-but-not-ignored, minus history,
+# plus fetched engine trees (without their .git).
 ship_tree() {
-	(cd "$ROOT" && git ls-files -co --exclude-standard | grep -v -e '^orig/' -e '^data/' |
-		tar -cf - -T -)
+	(cd "$ROOT" && {
+		git ls-files -co --exclude-standard | grep -v -e '^orig/'
+		for d in engines/*/src; do
+			[ -d "$d" ] && (cd "$d" && git ls-files) | sed "s|^|$d/|"
+		done
+	} | tar -cf - -T -)
+}
+
+engine_ok() {
+	[ -f "$ROOT/engines/$1/UPSTREAM" ] || die "no engine '$1' (engines/*/UPSTREAM)"
+}
+
+upstream() {  # engine key
+	sed -n "s/^$2=//p" "$ROOT/engines/$1/UPSTREAM"
+}
+
+cmd_fetch() {
+	[ $# -ge 1 ] || die "fetch needs an engine"
+	e=$1
+	engine_ok "$e"
+	src="$ROOT/engines/$e/src"
+	if [ -d "$src" ]; then
+		[ "${2:-}" = "--force" ] || die "engines/$e/src exists (work in progress?); use --force to replace it"
+		rm -rf "$src"
+	fi
+	git clone -q "$(upstream "$e" url)" "$src"
+	git -C "$src" checkout -q -b psdoom-plus "$(upstream "$e" commit)"
+	if ls "$ROOT/engines/$e/patches/"*.patch >/dev/null 2>&1; then
+		git -C "$src" -c user.name=psdev -c user.email=psdev@localhost \
+			am -q --whitespace=nowarn "$ROOT/engines/$e/patches/"*.patch
+	fi
+	echo "engines/$e/src: $(git -C "$src" log --oneline | head -1)"
+}
+
+cmd_export() {
+	[ $# -ge 1 ] || die "export needs an engine"
+	e=$1
+	engine_ok "$e"
+	src="$ROOT/engines/$e/src"
+	[ -d "$src/.git" ] || die "engines/$e/src is not fetched"
+	rm -f "$ROOT/engines/$e/patches/"*.patch
+	mkdir -p "$ROOT/engines/$e/patches"
+	git -C "$src" format-patch -q --no-signature --zero-commit \
+		-o "$ROOT/engines/$e/patches" "$(upstream "$e" commit)..psdoom-plus"
+	ls "$ROOT/engines/$e/patches"
+}
+
+cmd_build() {
+	[ $# -ge 1 ] || die "build needs an engine"
+	e=$1
+	engine_ok "$e"
+	[ -d "$ROOT/engines/$e/src" ] || cmd_fetch "$e"
+	cmake -S "$ROOT/engines/$e" -B "$ROOT/build/$e" >/dev/null
+	cmake --build "$ROOT/build/$e" -j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+}
+
+engine_vm() {
+	e=$1 os=$2
+	vm_os_ok "$os"
+	engine_ok "$e"
+	[ -d "$ROOT/engines/$e/src" ] || cmd_fetch "$e"
+	echo "== shipping tree to tv-$os"
+	ship_tree | ssh "tv-$os" 'rm -rf psdoom-plus && mkdir psdoom-plus && tar -xf - -C psdoom-plus'
+	echo "== bootstrap + build $e on tv-$os"
+	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/bootstrap.sh engines &&
+		cmake -S engines/$e -B build/$e >/dev/null &&
+		cmake --build build/$e -j2 2>&1 | grep -E 'error|warning: implicit' ; test -x build/$e/psdoom-$e" ||
+		die "build failed on tv-$os"
+	iwad=$(ssh "tv-$os" 'for f in /usr/share/games/doom/freedoom1.wad /usr/local/share/games/doom/freedoom1.wad /usr/local/share/doom/freedoom1.wad "$HOME/freedoom1.wad"; do [ -r "$f" ] && echo "$f" && break; done')
+	if [ -z "$iwad" ]; then
+		echo "== copying freedoom1.wad to tv-$os"
+		scp -q /usr/share/games/doom/freedoom1.wad "tv-$os:freedoom1.wad"
+		iwad='$HOME/freedoom1.wad'      # expanded by the guest's shell
+	fi
+	echo "== $e end-to-end on tv-$os (real signals, inside the guest)"
+	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/$e-pstest.sh build/$e/psdoom-$e \"$iwad\" tests/out"
+	rc=$?
+	mkdir -p "$ROOT/tests/out/$os"
+	scp -q "tv-$os:psdoom-plus/tests/out/*" "$ROOT/tests/out/$os/" 2>/dev/null
+	for f in "$ROOT/tests/out/$os/"*.ppm; do
+		[ -f "$f" ] && command -v convert >/dev/null && convert "$f" -scale 200% "${f%.ppm}.png"
+	done
+	return $rc
 }
 
 unit_local() {
@@ -102,7 +188,9 @@ cmd_test() {
 			unit_local
 		fi ;;
 	*)
-		not_yet "test $what" ;;
+		[ $# -ge 2 ] && [ "$1" = "--vm" ] ||
+			die "test $what needs --vm <os>: it sends real signals"
+		engine_vm "$what" "$2" ;;
 	esac
 }
 
@@ -111,7 +199,9 @@ cmd=$1; shift
 case $cmd in
 vm)              cmd_vm "$@" ;;
 test)            cmd_test "$@" ;;
-fetch|build)     not_yet "$cmd" ;;
+fetch)           cmd_fetch "$@" ;;
+export)          cmd_export "$@" ;;
+build)           cmd_build "$@" ;;
 -h|--help|help)  usage ;;
 *)               usage; exit 1 ;;
 esac

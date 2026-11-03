@@ -8,7 +8,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 
 | Engine | Status |
 |---|---|
-| og (id's linuxdoom-1.10 via doomgeneric) | planned |
+| og (id's linuxdoom-1.10 + SDL3) | **playable on Linux** |
 | Chocolate Doom, Crispy Doom | planned |
 | GZDoom, UZDoom | planned |
 | DSDA-Doom, Woof! | planned |
@@ -23,8 +23,15 @@ work unchanged.
 > nothing is protected: it will happily kill your shell, your desktop or itself. Try it in a
 > throwaway VM first.
 
-Nothing is playable yet: `libpsd` (the process side, Linux for now) is done and tested; the engines
-come next. See [PLAN.md](PLAN.md) for the design and the phases.
+The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux today; the other engines and
+platforms follow. See [PLAN.md](PLAN.md) for the design and the phases.
+
+```sh
+tools/psdev build og                       # fetch id's source, apply engines/og/patches, build
+build/og/psdoom-og -nopsact                # dry run first: shows processes, signals nothing
+build/og/psdoom-og -iwad freedoom1.wad     # modern mode (protected session, TERM then KILL)
+build/og/psdoom-og -psclassic              # psDooM 2000: renice +5, kill -9, nothing protected
+```
 
 ## Layout
 
@@ -34,7 +41,8 @@ come next. See [PLAN.md](PLAN.md) for the design and the phases.
 | `libpsd/` | the process library every engine links: backends, kill modes, audit log ([API](libpsd/include/psd.h)) |
 | `data/` | the original psDooM custom levels `psdoom1.wad` (Doom) and `psdoom2.wad` (Doom II) |
 | `tools/psdev` | developer CLI: test VMs, `test unit [--vm <os>]` |
-| `tests/vm/` | guest bootstrap |
+| `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
+| `tests/vm/` | guest bootstrap and end-to-end tests (`tools/psdev test og --vm debian`) |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |
 
 ## Credits

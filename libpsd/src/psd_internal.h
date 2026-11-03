@@ -50,6 +50,8 @@ typedef struct psd_backend psd_backend;
 struct psd_backend {
 	const char *name;
 	unsigned long ticks_per_sec; /* for cpu_ticks; 0 = no cpu info */
+	long long snap_ms;           /* when the last snapshot's data was gathered */
+	int settle_ms;               /* a kill may take this long to show in a snapshot */
 	void *state;
 
 	/* Fills *out with a backend-owned array valid until the next call. */

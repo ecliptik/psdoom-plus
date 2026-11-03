@@ -51,6 +51,7 @@ typedef struct cstate {
 	size_t blen, bcap;
 
 	/* last complete result */
+	long long result_started;    /* when the run that produced it began */
 	psd_proc *procs;
 	size_t nprocs, cap;
 	int have_result;
@@ -264,6 +265,7 @@ static void pump_ps(cstate *st)
 		waitpid(st->ps_pid, NULL, 0);
 		st->ps_pid = 0;
 		parse_result(st);
+		st->result_started = st->ps_started;
 		return;
 	}
 }
@@ -308,6 +310,7 @@ static int cmd_snapshot(psd_backend *b, psd_proc **out, size_t *n)
 	}
 	*out = st->procs;
 	*n = st->have_result ? st->nprocs : 0;
+	b->snap_ms = st->result_started;
 	return PSD_OK;
 }
 
@@ -407,6 +410,7 @@ int psd_backend_cmd_open(psd_backend *b, const struct psd_config *cfg)
 	memset(b, 0, sizeof *b);
 	b->name = "cmd";
 	b->ticks_per_sec = 0;
+	b->settle_ms = 1000;         /* the kill hook runs asynchronously too */
 	b->state = st;
 	b->snapshot = cmd_snapshot;
 	b->signal = cmd_signal;

@@ -157,6 +157,11 @@ int psd_kill(psd_ctx *ctx, long pid);
 /* Send one specific signal (weapon -> signal mapping, later phases). */
 int psd_send(psd_ctx *ctx, long pid, psd_signal sig);
 
+/* Forget every tracked monster without events (the engine changed level). */
+void psd_reset(psd_ctx *ctx);
+/* Forget one (the engine removed its monster itself); it is offered again. */
+void psd_forget(psd_ctx *ctx, long pid);
+
 /* Tracked process, or NULL. Valid until the next psd_poll. */
 const psd_proc *psd_lookup(psd_ctx *ctx, long pid);
 /* Modern mode asks before killing a root-owned process. */
@@ -165,6 +170,23 @@ int psd_needs_confirm(psd_ctx *ctx, long pid);
 psd_mode    psd_mode_of(const psd_ctx *ctx);
 const char *psd_backend_name(const psd_ctx *ctx);
 const char *psd_strerror(int err);
+
+/* ---- placement (psDooM's spawn geometry, shared by the Doom engines) ---- */
+
+typedef enum {
+	PSD_LEVEL_PSDOOM = 0,        /* psdoom1/2.wad: three 1024x1024 boxes at x = 0, 2048, 4096 */
+	PSD_LEVEL_E1M1,              /* stock E1M1: the hidden courtyard */
+	PSD_LEVEL_MAP01              /* stock MAP01: the hidden courtyard */
+} psd_level;
+
+#define PSD_PLACE_ATTEMPTS 17
+/*
+ * Map coordinates for a pid monster. attempt 0 is psDooM's spot; 1..16 are
+ * the nudges it tried (by one, then two, radii) when the monster collided.
+ * Returns PSD_ERR once the attempts are used up.
+ */
+int psd_place(psd_level level, long pid, int radius, int attempt,
+              int *x, int *y, int *angle);
 
 /* ---- mock backend (tests) ---- */
 

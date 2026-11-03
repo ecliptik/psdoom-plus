@@ -1,0 +1,231 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 15:08:23 -0800
+Subject: [PATCH 4/5] -iwad, Freedoom, XDG config and savegame directories
+
+- -iwad <file>: the game mode comes from the WAD's own lump directory
+  (MAP01 -> commercial, E4M1 -> retail, E2M1 -> registered).
+- With none of id's IWADs found, use Freedoom from DOOMWADDIR or the
+  usual system locations.
+- Config in $XDG_CONFIG_HOME/psdoom/og.cfg, savegames in
+  $XDG_DATA_HOME/psdoom/og/ (psDooM used ~/.psdoom, linuxdoom the cwd).
+---
+ linuxdoom-1.10/d_main.c   | 111 +++++++++++++++++++++++++++++++++++++-
+ linuxdoom-1.10/doomstat.h |   1 +
+ linuxdoom-1.10/g_game.c   |   2 +-
+ linuxdoom-1.10/m_menu.c   |   4 +-
+ 4 files changed, 113 insertions(+), 5 deletions(-)
+
+diff --git a/linuxdoom-1.10/d_main.c b/linuxdoom-1.10/d_main.c
+index 748a64b..0f9166e 100644
+--- a/linuxdoom-1.10/d_main.c
++++ b/linuxdoom-1.10/d_main.c
+@@ -34,6 +34,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
+ #ifdef NORMALUNIX
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <string.h>
+ #include <unistd.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -50,6 +51,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
+ 
+ #include "z_zone.h"
+ #include "w_wad.h"
++#include "m_swap.h"
+ #include "s_sound.h"
+ #include "v_video.h"
+ 
+@@ -124,6 +126,7 @@ boolean		advancedemo;
+ char		wadfile[1024];		// primary wad file
+ char		mapdir[1024];           // directory of development maps
+ char		basedefault[1024];      // default file
++char		savedir[1024];          // psdoom-plus: savegames, ends in '/'
+ 
+ 
+ void D_CheckNetGame (void);
+@@ -554,6 +557,94 @@ void D_AddFile (char *file)
+     wadfiles[numwadfiles] = newfile;
+ }
+ 
++
++//
++// psdoom-plus: XDG paths, -iwad and Freedoom
++//
++
++// mkdir -p for the directory part of path
++static void D_MakeParents (char* path)
++{
++    char*	p;
++
++    for (p = path + 1; *p; p++)
++    {
++	if (*p != '/')
++	    continue;
++	*p = 0;
++	mkdir (path, 0700);
++	*p = '/';
++    }
++}
++
++// $XDG_<var> or $HOME/<fallback>, then "/psdoom/<leaf>"
++static void D_XdgPath (char* out, size_t len, char* var, char* fallback, char* leaf)
++{
++    char*	base = getenv (var);
++    char*	home = getenv ("HOME");
++
++    if (base && base[0] == '/')
++	snprintf (out, len, "%s/psdoom/%s", base, leaf);
++    else if (home)
++	snprintf (out, len, "%s/%s/psdoom/%s", home, fallback, leaf);
++    else
++	snprintf (out, len, "./%s", leaf);
++    D_MakeParents (out);
++}
++
++// The game mode of an IWAD, from its own lump directory.
++static GameMode_t D_IwadMode (char* path)
++{
++    FILE*	f = fopen (path, "rb");
++    char	hdr[12], entry[16];
++    int		numlumps, dirofs, i;
++    boolean	map01 = false, e2m1 = false, e4m1 = false;
++
++    if (!f)
++	I_Error ("Cannot open IWAD %s", path);
++    if (fread (hdr, 1, 12, f) != 12 || memcmp (hdr, "IWAD", 4))
++	I_Error ("%s is not an IWAD", path);
++    numlumps = LONG (*(int*)(hdr+4));
++    dirofs = LONG (*(int*)(hdr+8));
++    fseek (f, dirofs, SEEK_SET);
++    for (i = 0; i < numlumps && fread (entry, 1, 16, f) == 16; i++)
++    {
++	if (!strncmp (entry+8, "MAP01", 8)) map01 = true;
++	if (!strncmp (entry+8, "E2M1", 8)) e2m1 = true;
++	if (!strncmp (entry+8, "E4M1", 8)) e4m1 = true;
++    }
++    fclose (f);
++    if (map01) return commercial;
++    if (e4m1)  return retail;
++    if (e2m1)  return registered;
++    return shareware;
++}
++
++// Freedoom, in the usual install locations, after id's own names.
++static boolean D_FindFreedoom (char* waddir)
++{
++    char*	dirs[] = { waddir, "/usr/share/games/doom", "/usr/local/share/games/doom",
++			   "/usr/local/share/doom", "/usr/pkg/share/doom",
++			   "/boot/system/data/doom", NULL };
++    char*	names[] = { "freedoom2.wad", "freedoom1.wad", NULL };
++    char	path[1024];
++    int		d, n;
++
++    for (d = 0; dirs[d]; d++)
++	for (n = 0; names[n]; n++)
++	{
++	    snprintf (path, sizeof path, "%s/%s", dirs[d], names[n]);
++	    if (!access (path, R_OK))
++	    {
++		gamemode = D_IwadMode (path);
++		printf ("Using Freedoom: %s\n", path);
++		D_AddFile (strdup (path));
++		return true;
++	    }
++	}
++    return false;
++}
++
+ //
+ // IdentifyVersion
+ // Checks availability of IWAD files by name,
+@@ -611,9 +702,21 @@ void IdentifyVersion (void)
+     home = getenv("HOME");
+     if (!home)
+       I_Error("Please set $HOME to your home directory");
+-    sprintf(basedefault, "%s/.doomrc", home);
++    // psdoom-plus: XDG config and data directories instead of ~/.doomrc
++    D_XdgPath (basedefault, sizeof basedefault, "XDG_CONFIG_HOME", ".config", "og.cfg");
++    D_XdgPath (savedir, sizeof savedir, "XDG_DATA_HOME", ".local/share", "og/");
+ #endif
+ 
++    {
++	int p = M_CheckParm ("-iwad");
++	if (p && p < myargc-1)
++	{
++	    gamemode = D_IwadMode (myargv[p+1]);
++	    D_AddFile (myargv[p+1]);
++	    return;
++	}
++    }
++
+     if (M_CheckParm ("-shdev"))
+     {
+ 	gamemode = shareware;
+@@ -708,6 +811,10 @@ void IdentifyVersion (void)
+       return;
+     }
+ 
++#ifdef NORMALUNIX
++    if (D_FindFreedoom (doomwaddir))
++	return;
++#endif
+     printf("Game mode indeterminate.\n");
+     gamemode = indetermined;
+ 
+@@ -1153,7 +1260,7 @@ void D_DoomMain (void)
+ 	if (M_CheckParm("-cdrom"))
+ 	    sprintf(file, "c:\\doomdata\\"SAVEGAMENAME"%c.dsg",myargv[p+1][0]);
+ 	else
+-	    sprintf(file, SAVEGAMENAME"%c.dsg",myargv[p+1][0]);
++	    sprintf(file, "%s"SAVEGAMENAME"%c.dsg",savedir,myargv[p+1][0]);
+ 	G_LoadGame (file);
+     }
+ 	
+diff --git a/linuxdoom-1.10/doomstat.h b/linuxdoom-1.10/doomstat.h
+index 65f5225..e885e6e 100644
+--- a/linuxdoom-1.10/doomstat.h
++++ b/linuxdoom-1.10/doomstat.h
+@@ -242,6 +242,7 @@ extern  int		maxammo[NUMAMMO];
+ 
+ // File handling stuff.
+ extern	char		basedefault[1024];
++extern	char		savedir[1024];	// psdoom-plus: savegame directory, ends in '/'
+ extern  FILE*		debugfile;
+ 
+ // if true, load all graphics at level load
+diff --git a/linuxdoom-1.10/g_game.c b/linuxdoom-1.10/g_game.c
+index 30ac33c..3d728aa 100644
+--- a/linuxdoom-1.10/g_game.c
++++ b/linuxdoom-1.10/g_game.c
+@@ -1278,7 +1278,7 @@ void G_DoSaveGame (void)
+     if (M_CheckParm("-cdrom"))
+ 	sprintf(name,"c:\\doomdata\\"SAVEGAMENAME"%d.dsg",savegameslot);
+     else
+-	sprintf (name,SAVEGAMENAME"%d.dsg",savegameslot); 
++	sprintf (name,"%s"SAVEGAMENAME"%d.dsg",savedir,savegameslot); 
+     description = savedescription; 
+ 	 
+     save_p = savebuffer = screens[1]+0x4000; 
+diff --git a/linuxdoom-1.10/m_menu.c b/linuxdoom-1.10/m_menu.c
+index 4d415ae..3f50480 100644
+--- a/linuxdoom-1.10/m_menu.c
++++ b/linuxdoom-1.10/m_menu.c
+@@ -520,7 +520,7 @@ void M_ReadSaveStrings(void)
+ 	if (M_CheckParm("-cdrom"))
+ 	    sprintf(name,"c:\\doomdata\\"SAVEGAMENAME"%d.dsg",i);
+ 	else
+-	    sprintf(name,SAVEGAMENAME"%d.dsg",i);
++	    sprintf(name,"%s"SAVEGAMENAME"%d.dsg",savedir,i);
+ 
+ 	handle = open (name, O_RDONLY | 0, 0666);
+ 	if (handle == -1)
+@@ -583,7 +583,7 @@ void M_LoadSelect(int choice)
+     if (M_CheckParm("-cdrom"))
+ 	sprintf(name,"c:\\doomdata\\"SAVEGAMENAME"%d.dsg",choice);
+     else
+-	sprintf(name,SAVEGAMENAME"%d.dsg",choice);
++	sprintf(name,"%s"SAVEGAMENAME"%d.dsg",savedir,choice);
+     G_LoadGame (name);
+     M_ClearMenus ();
+ }

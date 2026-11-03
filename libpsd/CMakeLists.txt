@@ -11,6 +11,7 @@ set(PSD_SOURCES
     src/psd_config.c
     src/psd_platform.c
     src/psd_util.c
+    src/psd_place.c
     src/backend_mock.c
 )
 
@@ -46,7 +47,7 @@ endif()
 
 if(PSD_BUILD_TESTS)
     enable_testing()
-    foreach(t core config native cmd)
+    foreach(t core config native cmd place)
         add_executable(test_${t} tests/test_${t}.c)
         target_link_libraries(test_${t} PRIVATE psd)
         target_include_directories(test_${t} PRIVATE src tests)

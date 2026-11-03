@@ -444,6 +444,28 @@ static void confirm_root_kills_in_modern(void)
 	psd_close(ctx);
 }
 
+static void reset_and_forget(void)
+{
+	rec r = { 0 };
+	psd_ctx *ctx;
+
+	world("alice");
+	ctx = open_with(PSD_MODE_CLASSIC, 0, NULL);
+	psd_poll(ctx, on_event, &r);
+	psd_forget(ctx, 1100);
+	CHECK(psd_lookup(ctx, 1100) == NULL);
+	r.spawn = 0;
+	psd_poll(ctx, on_event, &r);
+	CHECK_EQ(r.spawn, 1);                        /* offered again */
+	psd_reset(ctx);                              /* new level */
+	r.spawn = 0;
+	r.remove = 0;
+	psd_poll(ctx, on_event, &r);
+	CHECK_EQ(r.spawn, 5);
+	CHECK_EQ(r.remove, 0);                       /* no events for the old level */
+	psd_close(ctx);
+}
+
 static void nopsmon_disables(void)
 {
 	char *a[] = { "doom", "-nopsmon" };
@@ -476,6 +498,7 @@ int main(void)
 	RUN(dry_run_signals_nothing);
 	RUN(labels_are_last_seven);
 	RUN(confirm_root_kills_in_modern);
+	RUN(reset_and_forget);
 	RUN(nopsmon_disables);
 	TEST_DONE();
 }

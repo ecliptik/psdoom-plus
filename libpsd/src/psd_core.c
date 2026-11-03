@@ -34,6 +34,7 @@ typedef struct track {
 	int wounded;                 /* classic: renice only on the first hit of a life */
 	int nice_set;                /* highest nice we applied, -100 = none */
 	long long kill_deadline;     /* modern: when TERM escalates to KILL, 0 = none */
+	long long killed_ms;         /* when the engine reported the monster's death */
 } track;
 
 typedef struct hist {
@@ -412,10 +413,11 @@ int psd_poll(psd_ctx *ctx, psd_event_fn fn, void *user)
 	int rc;
 
 	psd_tick(ctx);
+	now = now_ms(ctx);
+	ctx->be.snap_ms = now;           /* synchronous backends; async ones override */
 	rc = ctx->be.snapshot(&ctx->be, &snap, &n);
 	if (rc != PSD_OK)
 		return rc;
-	now = now_ms(ctx);
 
 	for (i = 0; i < n; i++)
 		psd_make_label(&snap[i]);
@@ -461,6 +463,8 @@ int psd_poll(psd_ctx *ctx, psd_event_fn fn, void *user)
 		if (t->state == T_DEAD) {
 			if (t->kill_deadline && now < t->kill_deadline)
 				continue;    /* modern: still inside the TERM grace period */
+			if (ctx->be.snap_ms < t->killed_ms + ctx->be.settle_ms)
+				continue;    /* this snapshot predates the kill */
 			/* the monster died but the process did not */
 			if (fn(user, PSD_EV_RESURRECT, &t->p)) {
 				t->state = T_ALIVE;
@@ -550,6 +554,7 @@ int psd_kill(psd_ctx *ctx, long pid)
 		return PSD_ERR_PROTECTED;
 	}
 	t->state = T_DEAD;
+	t->killed_ms = now_ms(ctx);
 	if (ctx->cfg.mode == PSD_MODE_CLASSIC || ctx->grace_ms == 0)
 		return deliver(ctx, t, PSD_SIG_KILL, "kill");
 
@@ -612,6 +617,19 @@ int psd_wound(psd_ctx *ctx, long pid, int health, int spawnhealth)
 	if (rc == PSD_OK)
 		t->nice_set = target;
 	return rc;
+}
+
+void psd_reset(psd_ctx *ctx)
+{
+	ctx->ntracks = 0;
+}
+
+void psd_forget(psd_ctx *ctx, long pid)
+{
+	track *t = find_track(ctx, pid);
+
+	if (t != NULL)
+		drop_track(ctx, t);
 }
 
 const psd_proc *psd_lookup(psd_ctx *ctx, long pid)

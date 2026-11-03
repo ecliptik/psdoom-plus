@@ -1,0 +1,340 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 15:15:26 -0800
+Subject: [PATCH 5/5] psDooM: processes as monsters, through libpsd
+
+The hooks psDooM 2000.05.03.b added to XDoom, on linuxdoom-1.10. The
+logic lives in psdoom/p_psdoom.c (psdoom-plus tree) and libpsd; this
+patch only calls it:
+
+- p_mobj.h, r_defs.h: pid, label and flags on things and vissprites
+- d_main.c: auto-load psdoom1/2.wad (unless -nopslev), open libpsd
+- p_setup.c: forget the old level's monsters, spawn processes on load
+- p_tick.c: poll processes every tic (libpsd decides how often to look)
+- p_inter.c: only players hurt pid monsters (-nopssafety lifts it);
+  damage renices, death kills, a vanished process drops nothing
+- p_mobj.c: tell libpsd when the engine removes a pid monster;
+  -respawnitems (psDooM)
+- p_saveg.c: pid monsters aren't saved; resync after loading
+- g_game.c: -nomonsters. persists across new games (psDooM)
+- r_things.c: psDooM's floating 'pid / name' label above each monster
+---
+ linuxdoom-1.10/d_main.c   |  3 +++
+ linuxdoom-1.10/g_game.c   |  4 ++++
+ linuxdoom-1.10/p_inter.c  | 12 ++++++++++++
+ linuxdoom-1.10/p_mobj.c   |  7 +++++--
+ linuxdoom-1.10/p_mobj.h   |  7 +++++++
+ linuxdoom-1.10/p_saveg.c  |  4 ++++
+ linuxdoom-1.10/p_setup.c  |  4 ++++
+ linuxdoom-1.10/p_tick.c   |  2 ++
+ linuxdoom-1.10/r_defs.h   |  5 +++++
+ linuxdoom-1.10/r_things.c | 16 ++++++++++++++++
+ 10 files changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/linuxdoom-1.10/d_main.c b/linuxdoom-1.10/d_main.c
+index 0f9166e..1bb1fde 100644
+--- a/linuxdoom-1.10/d_main.c
++++ b/linuxdoom-1.10/d_main.c
+@@ -78,6 +78,7 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
+ 
+ 
+ #include "d_main.h"
++#include "p_psdoom.h"
+ 
+ //
+ // D-DoomLoop()
+@@ -908,6 +909,7 @@ void D_DoomMain (void)
+     FindResponseFile ();
+ 	
+     IdentifyVersion ();
++    PS_AddCustomLevel ();	// psdoom-plus: psdoom1/2.wad
+ 	
+     setbuf (stdout, NULL);
+     modifiedgame = false;
+@@ -1206,6 +1208,7 @@ void D_DoomMain (void)
+ 
+     printf ("I_Init: Setting up machine state.\n");
+     I_Init ();
++    PS_Init ();			// psdoom-plus: open libpsd
+ 
+     printf ("D_CheckNetGame: Checking network game status.\n");
+     D_CheckNetGame ();
+diff --git a/linuxdoom-1.10/g_game.c b/linuxdoom-1.10/g_game.c
+index 3d728aa..b61ea6d 100644
+--- a/linuxdoom-1.10/g_game.c
++++ b/linuxdoom-1.10/g_game.c
+@@ -69,6 +69,7 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
+ 
+ 
+ #include "g_game.h"
++#include "p_psdoom.h"
+ 
+ 
+ #define SAVEGAMESIZE	0x2c000
+@@ -1413,6 +1414,9 @@ G_InitNew
+ 		 
+     M_ClearRandom (); 
+ 	 
++    if (nomonstersperiod)
++	nomonsters = true;	// psdoom-plus: -nomonsters. (psDooM)
++
+     if (skill == sk_nightmare || respawnparm )
+ 	respawnmonsters = true;
+     else
+diff --git a/linuxdoom-1.10/p_inter.c b/linuxdoom-1.10/p_inter.c
+index eea30f1..73193b4 100644
+--- a/linuxdoom-1.10/p_inter.c
++++ b/linuxdoom-1.10/p_inter.c
+@@ -46,6 +46,7 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
+ #pragma implementation "p_inter.h"
+ #endif
+ #include "p_inter.h"
++#include "p_psdoom.h"
+ 
+ 
+ #define BONUSADD	6
+@@ -674,6 +675,8 @@ P_KillMobj
+ 	
+     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);
+ 
++    PS_Killed (source, target);	// psdoom-plus: kill the process
++
+     if (target->type != MT_SKULL)
+ 	target->flags &= ~MF_NOGRAVITY;
+ 
+@@ -731,6 +734,10 @@ P_KillMobj
+     //	I_StartSound (&actor->r, actor->info->deathsound);
+ 
+ 
++    // psdoom-plus: a vanished process leaves nothing behind
++    if (PS_NoDrop (target))
++	return;
++
+     // Drop stuff.
+     // This determines the kind of object spawned
+     // during the death frame of a thing.
+@@ -790,6 +797,10 @@ P_DamageMobj
+     if (target->health <= 0)
+ 	return;
+ 
++    // psdoom-plus: pid monsters only take damage from players (psDooM)
++    if (!PS_DamageAllowed (target, inflictor, source))
++	return;
++
+     if ( target->flags & MF_SKULLFLY )
+     {
+ 	target->momx = target->momy = target->momz = 0;
+@@ -885,6 +896,7 @@ P_DamageMobj
+     
+     // do the damage	
+     target->health -= damage;	
++    PS_Damaged (target);	// psdoom-plus: renice
+     if (target->health <= 0)
+     {
+ 	P_KillMobj (source, target);
+diff --git a/linuxdoom-1.10/p_mobj.c b/linuxdoom-1.10/p_mobj.c
+index 209d161..9f6c2f7 100644
+--- a/linuxdoom-1.10/p_mobj.c
++++ b/linuxdoom-1.10/p_mobj.c
+@@ -30,6 +30,7 @@ rcsid[] = "$Id: p_mobj.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
+ 
+ #include "doomdef.h"
+ #include "p_local.h"
++#include "p_psdoom.h"
+ #include "sounds.h"
+ 
+ #include "st_stuff.h"
+@@ -545,6 +546,8 @@ int		iquetail;
+ 
+ void P_RemoveMobj (mobj_t* mobj)
+ {
++    PS_MobjRemoved (mobj);	// psdoom-plus
++
+     if ((mobj->flags & MF_SPECIAL)
+ 	&& !(mobj->flags & MF_DROPPED)
+ 	&& (mobj->type != MT_INV)
+@@ -587,8 +590,8 @@ void P_RespawnSpecials (void)
+     
+     int			i;
+ 
+-    // only respawn items in deathmatch
+-    if (deathmatch != 2)
++    // only respawn items in deathmatch (or with psDooM's -respawnitems)
++    if (deathmatch != 2 && (!respawnitems || demorecording || demoplayback))
+ 	return;	// 
+ 
+     // nothing left to respawn?
+diff --git a/linuxdoom-1.10/p_mobj.h b/linuxdoom-1.10/p_mobj.h
+index 75d368a..43fadfc 100644
+--- a/linuxdoom-1.10/p_mobj.h
++++ b/linuxdoom-1.10/p_mobj.h
+@@ -282,6 +282,13 @@ typedef struct mobj_s
+ 
+     // Thing being chased/attacked for tracers.
+     struct mobj_s*	tracer;	
++
++    // psdoom-plus: this monster is a process
++    long		ps_pid;		// 0 = an ordinary thing
++    char		ps_label[8];	// last 7 chars of the process name
++    boolean		ps_draw;	// draw the floating pid/name label
++    boolean		ps_removing;	// being removed because the process is gone
++    boolean		ps_protected;	// modern mode: shown but invulnerable
+     
+ } mobj_t;
+ 
+diff --git a/linuxdoom-1.10/p_saveg.c b/linuxdoom-1.10/p_saveg.c
+index a3bcfee..dda47f5 100644
+--- a/linuxdoom-1.10/p_saveg.c
++++ b/linuxdoom-1.10/p_saveg.c
+@@ -27,6 +27,7 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
+ #include "i_system.h"
+ #include "z_zone.h"
+ #include "p_local.h"
++#include "p_psdoom.h"
+ 
+ // State.
+ #include "doomstat.h"
+@@ -239,6 +240,8 @@ void P_ArchiveThinkers (void)
+     {
+ 	if (th->function.acp1 == (actionf_p1)P_MobjThinker)
+ 	{
++	    if (PS_SkipSave ((mobj_t *)th))
++		continue;	// psdoom-plus: processes are re-read on load
+ 	    *save_p++ = tc_mobj;
+ 	    PADSAVEP();
+ 	    mobj = (mobj_t *)save_p;
+@@ -292,6 +295,7 @@ void P_UnArchiveThinkers (void)
+ 	switch (tclass)
+ 	{
+ 	  case tc_end:
++	    PS_SaveLoaded ();	// psdoom-plus
+ 	    return; 	// end of list
+ 			
+ 	  case tc_mobj:
+diff --git a/linuxdoom-1.10/p_setup.c b/linuxdoom-1.10/p_setup.c
+index f27b4ff..9a27a12 100644
+--- a/linuxdoom-1.10/p_setup.c
++++ b/linuxdoom-1.10/p_setup.c
+@@ -40,6 +40,7 @@ rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
+ 
+ #include "doomdef.h"
+ #include "p_local.h"
++#include "p_psdoom.h"
+ 
+ #include "s_sound.h"
+ 
+@@ -605,6 +606,7 @@ P_SetupLevel
+ 
+     // Make sure all sounds are stopped before Z_FreeTags.
+     S_Start ();			
++    PS_LevelEnd ();		// psdoom-plus: forget the old level's monsters
+ 
+     
+ #if 0 // UNUSED
+@@ -688,6 +690,8 @@ P_SetupLevel
+     if (precache)
+ 	R_PrecacheLevel ();
+ 
++    PS_LevelStart ();		// psdoom-plus: spawn the processes
++
+     //printf ("free memory: 0x%x\n", Z_FreeMemory());
+ 
+ }
+diff --git a/linuxdoom-1.10/p_tick.c b/linuxdoom-1.10/p_tick.c
+index 9b16a6d..265caa6 100644
+--- a/linuxdoom-1.10/p_tick.c
++++ b/linuxdoom-1.10/p_tick.c
+@@ -27,6 +27,7 @@ rcsid[] = "$Id: p_tick.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
+ 
+ #include "z_zone.h"
+ #include "p_local.h"
++#include "p_psdoom.h"
+ 
+ #include "doomstat.h"
+ 
+@@ -152,6 +153,7 @@ void P_Ticker (void)
+     P_RunThinkers ();
+     P_UpdateSpecials ();
+     P_RespawnSpecials ();
++    PS_Ticker ();		// psdoom-plus: processes come and go
+ 
+     // for par times
+     leveltime++;	
+diff --git a/linuxdoom-1.10/r_defs.h b/linuxdoom-1.10/r_defs.h
+index 6c842a5..22b67e5 100644
+--- a/linuxdoom-1.10/r_defs.h
++++ b/linuxdoom-1.10/r_defs.h
+@@ -405,6 +405,11 @@ typedef struct vissprite_s
+     lighttable_t*	colormap;
+    
+     int			mobjflags;
++
++    // psdoom-plus: label for pid monsters
++    long		ps_pid;
++    char		ps_label[8];
++    boolean		ps_draw;
+     
+ } vissprite_t;
+ 
+diff --git a/linuxdoom-1.10/r_things.c b/linuxdoom-1.10/r_things.c
+index c201fff..3642b66 100644
+--- a/linuxdoom-1.10/r_things.c
++++ b/linuxdoom-1.10/r_things.c
+@@ -38,6 +38,7 @@ rcsid[] = "$Id: r_things.c,v 1.5 1997/02/03 16:47:56 b1 Exp $";
+ #include "w_wad.h"
+ 
+ #include "r_local.h"
++#include "p_psdoom.h"
+ 
+ #include "doomstat.h"
+ 
+@@ -373,6 +374,10 @@ void R_DrawMaskedColumn (column_t* column)
+ 
+ 	if (dc_yl <= dc_yh)
+ 	{
++	    // psdoom-plus: where the label goes (top of what was drawn)
++	    if (!ps_col_drawn || dc_yl < ps_col_top)
++		ps_col_top = dc_yl;
++	    ps_col_drawn = true;
+ 	    dc_source = (byte *)column + 3;
+ 	    dc_texturemid = basetexturemid - (column->topdelta<<FRACBITS);
+ 	    // dc_source = (byte *)column + 3 - column->topdelta;
+@@ -426,6 +431,8 @@ R_DrawVisSprite
+     frac = vis->startfrac;
+     spryscale = vis->scale;
+     sprtopscreen = centeryfrac - FixedMul(dc_texturemid,spryscale);
++    ps_col_drawn = false;
++    ps_col_top = viewheight;
+ 	
+     for (dc_x=vis->x1 ; dc_x<=vis->x2 ; dc_x++, frac += vis->xiscale)
+     {
+@@ -440,6 +447,11 @@ R_DrawVisSprite
+     }
+ 
+     colfunc = basecolfunc;
++
++    // psdoom-plus: psDooM's floating "pid / name" label
++    if (vis->ps_draw && ps_col_drawn)
++	PS_DrawLabel (vis->ps_pid, vis->ps_label, vis->x1, vis->x2,
++		      ps_col_top, vis->scale);
+ }
+ 
+ 
+@@ -549,6 +561,9 @@ void R_ProjectSprite (mobj_t* thing)
+     // store information in a vissprite
+     vis = R_NewVisSprite ();
+     vis->mobjflags = thing->flags;
++    vis->ps_pid = thing->ps_pid;
++    vis->ps_draw = thing->ps_pid && thing->ps_draw;
++    memcpy (vis->ps_label, thing->ps_label, sizeof vis->ps_label);
+     vis->scale = xscale<<detailshift;
+     vis->gx = thing->x;
+     vis->gy = thing->y;
+@@ -692,6 +707,7 @@ void R_DrawPSprite (pspdef_t* psp)
+     // store information in a vissprite
+     vis = &avis;
+     vis->mobjflags = 0;
++    vis->ps_draw = false;
+     vis->texturemid = (BASEYCENTER<<FRACBITS)+FRACUNIT/2-(psp->sy-spritetopoffset[lump]);
+     vis->x1 = x1 < 0 ? 0 : x1;
+     vis->x2 = x2 >= viewwidth ? viewwidth-1 : x2;	

@@ -1,0 +1,4 @@
+url=https://github.com/id-Software/DOOM.git
+commit=a77dfb96cb91780ca334d0d4cfd86957558007e0
+subdir=linuxdoom-1.10
+license=GPL-2.0 (LICENSE.TXT, 1999 re-release)
