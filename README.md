@@ -14,8 +14,9 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | DSDA-Doom, Woof! | planned |
 | Quake, Quake 3 (stretch) | planned |
 
-Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku. Monsters can also stand for Docker/Podman
-containers and Kubernetes pods.
+Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku. Anything else (containers, pods,
+cloud apps) can plug in through psdoom-ng's `PSDOOM_NG_*_CMD` hooks, so kubedoom-style helpers
+work unchanged.
 
 > **Warning:** this program sends real signals to real processes. In `classic` mode
 > nothing is protected: it will happily kill your shell, your desktop or itself. Try it in a
@@ -29,7 +30,7 @@ Nothing is playable yet. See [PLAN.md](PLAN.md) for the design and the phases.
 |---|---|
 | `PLAN.md` | design, decisions and phases |
 | `data/` | the original psDooM custom levels `psdoom1.wad` (Doom) and `psdoom2.wad` (Doom II) |
-| `tools/psd` | developer CLI (test VMs now; fetch/build/test as phases land) |
+| `tools/psdev` | developer CLI (test VMs now; fetch/build/test as phases land) |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |
 
 ## Credits

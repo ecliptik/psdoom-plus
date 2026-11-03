@@ -13,7 +13,7 @@ Repo: https://github.com/ecliptik/psdoom-plus (public, empty as of 2026-11-03).
 | "og" target | **Vanilla linuxdoom-1.10** (via doomgeneric + SDL2) with the psDooM hooks applied |
 | Multi-engine approach | **libpsd + patch sets**: one portable C library, a small per-engine patch series against a pinned upstream tag |
 | Kill policy | **Two modes** (see "Kill modes"): `classic`, which is faithful to 2000 (`renice +5`, `SIGKILL`, nothing protected, can kill itself), and `modern`, a friendlier mode with protected processes and graceful signals. Audio daemons are *not* protected: killing PipeWire/PulseAudio is fair game |
-| Extra targets | **Containers (Docker/Podman)** and **Kubernetes pods**, alongside local processes |
+| Extra targets | **Local processes only.** No built-in Docker/Podman/Kubernetes backends (dropped 2026-11-03; kubedoom already does pods well). Containers, pods and anything else plug in via the psdoom-ng-compatible `cmd` hooks |
 | GZDoom family | Target **both GZDoom (4.14.x) and UZDoom** with one patch series and two `UPSTREAM` pins (added 2026-11-03) |
 | Repo access | `pass:hosts/claude/github-release-token` (fine-grained, ecliptik/*, Contents + Workflows RW). Pushes use a one-off credential helper piping from `hpass`, so the token is never written to disk |
 
@@ -38,10 +38,19 @@ Repo: https://github.com/ecliptik/psdoom-plus (public, empty as of 2026-11-03).
 - Flags to keep: `-nopsmon -nopsact -nopssafety -psallusers -psuser -psnotuser -nopslev
   -nomonsters. -respawnitems`; user from `PSDOOMUSER/LOGNAME/USER/USERNAME`.
 
-**Prior art to borrow from (all GPL):** psdoom-ng / psdoom-ng1 (Chocolate-based; added the
-`PSDOOMPSCMD`/`PSDOOMRENICECMD`/`PSDOOMKILLCMD` external-command hooks, now stale on SDL1) and
-kubedoom/dockerdoom (pods/containers through those hooks). We keep env-var compatibility with
-psdoom-ng so existing kubedoom-style setups work.
+**Prior art to borrow from (all GPL):**
+- **psdoom-ng → psdoom-ng1** (Orson Teodoro, `orsonteodoro/psdoom-ng1`, GPL-2.0, last push
+  2025-06). psDooM moved onto Chocolate Doom; now SDL2, Autotools/CMake, Linux + macOS, with a
+  `psd` wrapper and a man page. Still a single engine, still shells out to `ps`/`kill`
+  (procps, util-linux), classic kill semantics, and the external calls are synchronous (it
+  hitches when they are slow). Hector Rivas Gandara (keymon) added the external-command hooks
+  `PSDOOM_NG_PS_CMD` (prints `<user> <pid> <name> <is_daemon>` per line),
+  `PSDOOM_NG_RENICE_CMD` and `PSDOOM_NG_KILL_CMD` (each gets the pid as an argument).
+- **dockerdoom** (2015, dead) forked psdoom-ng for Docker. **kubedoom** (`storax/kubedoom`, last
+  push 2024-08) vendors dockerdoom plus a Go helper that answers the hooks with `kubectl`.
+- libpsd's `cmd` backend implements those exact variables and line format, so psdoom-ng1
+  scripts and kubedoom-style helpers drive any psdoom-plus engine. It runs the calls
+  asynchronously so a slow helper doesn't stall the game.
 
 ## Architecture
 
@@ -60,7 +69,7 @@ psdoom-ng so existing kubedoom-style setups work.
             |   linux (/proc)  freebsd/dragonfly (sysctl KERN_PROC)   |
             |   openbsd (sysctl KERN_PROC)  netbsd (KERN_PROC2)       |
             |   haiku (get_next_team_info, kill, set_thread_priority) |
-            |   cmd (psdoom-ng env vars)  docker/podman  k8s  mock    |
+            |   cmd (psdoom-ng PSDOOM_NG_*_CMD hooks, async)  mock    |
             +---------------------------------------------------------+
 ```
 
@@ -75,10 +84,9 @@ psdoom-ng so existing kubedoom-style setups work.
 - **Freedoom**: its E1M1/MAP01 layouts differ from id's, so the hard-coded courtyards don't apply.
   With Freedoom we load psdoom1/2.wad, or ship a PSDBOXES lump for Freedoom maps. CI and the VMs use
   Freedoom so no commercial IWAD ever has to be copied around.
-- **Containers / k8s** (backend selected with `-psbackend docker|podman|k8s`): a container or pod
-  maps to a monster. Wound → `docker update --cpu-shares` down (k8s: annotate only). Kill →
-  `docker kill` / `kubectl delete pod`. These run through the CLI with argv exec, no shell.
-  Monster type: privileged or system namespace → Demon, otherwise Shotgun guy.
+- **External sources via hooks only**: containers, pods or cloud apps come from a helper that
+  speaks the psdoom-ng hook protocol (`PSDOOM_NG_PS_CMD` etc.), for example kubedoom's helper or a
+  ten-line `docker ps` script. libpsd ships no container code of its own.
 - **Off by default, as in the original**: in netgames (desync risk) and demo record/playback.
   Save games drop pid mobjs on save and resync them on load.
 
@@ -98,7 +106,7 @@ fresh build run on a real desktop doesn't take the session down; `classic` is on
 
 **Protected in `modern`** (built-in list, extendable in config):
 - psDooM itself, its parent chain (shell, terminal emulator, tmux/screen) and its own helper
-  children (the `docker`/`kubectl` CLI it spawns, the privileged helper)
+  children (the external hook commands it spawns, the privileged helper)
 - pid 0/1 and kernel threads (Linux `kthreadd` descendants; BSD `[idle]`, `[pagedaemon]` and
   similar; Haiku `kernel_team`)
 - `sshd` and every ancestor of an ssh session (so a remote VNC/ssh session survives)
@@ -121,7 +129,7 @@ Each item is marked **v1** (built in the main phases) or **later**.
   and uptime on the HUD. The floating label stays pid + name.
 - **v1** "Play any map" (`-psanymap`): pid monsters replace the map's own monster spawn points, so
   any WAD or megawad becomes a process room. No PSDBOXES lump is needed.
-- **v1** Filters: `-psfilter` regex on name/cmdline, `-psmincpu`, top-N, per-container/cgroup.
+- **v1** Filters: `-psfilter` regex on name/cmdline, `-psmincpu`, top-N, per-cgroup.
 - **later** Weapon → signal (from the original TODO): fist/berserk = `SIGSTOP` (the monster
   freezes; `SIGCONT` when it "wakes"), pistol/chaingun = `SIGTERM`, shotgun = `SIGHUP`, plasma =
   `SIGKILL`, BFG = `SIGKILL` to the whole process group. The rocket launcher's splash damage hits
@@ -159,7 +167,7 @@ engines/<name>/
 data/                   psdoom1.wad psdoom2.wad (from orig), PSDBOXES lumps, psdoom.pk3 (GZDoom)
 quake/  quake3/         stretch targets
 tests/  unit/ integration/ vm/ (per-OS bootstrap + harness)
-tools/                  psd (top-level CLI: build/test/rebase), patch-rebase helpers
+tools/                  psdev (developer CLI: vm/fetch/build/test/rebase), patch-rebase helpers
 orig/                   untouched historical sources (reference only)
 docs/
 ```
@@ -222,8 +230,8 @@ The existing clean-install **testvm** guests on jezebel are used. No new VMs nee
    This runs once per kill mode: `classic` must kill a decoy that pretends to be sshd, and `modern`
    must spawn a protected decoy without being able to kill it, log a TERM→KILL escalation, and
    leave its own parent shell alive.
-3. **Container/k8s**: Docker + k3s inside `tv-debian` (after a revert), using throwaway `busybox`
-   containers/pods.
+3. **Hook interop**: a fake helper script speaking the psdoom-ng protocol (including a deliberately
+   slow one, to prove the game doesn't stall).
 4. **Manual play**: VNC into the guest and shoot things.
 
 CI (later): GitHub Actions Linux runs the unit tests plus mock-backend engine builds. BSD runs use
@@ -232,7 +240,7 @@ vmactions, as a second check on top of the jezebel guests.
 ## Phases
 
 0. **Bootstrap**: git repo → `ecliptik/psdoom-plus`; import `orig/` as reference (original tarballs
-   plus the reconstructed 2000.05.03.b tree); README, LICENSE, `tools/psd` skeleton; vault project card.
+   plus the reconstructed 2000.05.03.b tree); README, LICENSE, `tools/psdev` skeleton; vault project card.
 1. **libpsd core**: API, diff/resurrect logic ported from `pr_process.c`, Linux + mock + cmd
    (psdoom-ng env vars) backends, unit tests. *Exit:* unit tests green on tv-debian.
 2. **og (linuxdoom via doomgeneric)**: port the ~60 hunks onto libpsd, SDL2, PSDBOXES, psdoom1/2.wad,
@@ -242,7 +250,9 @@ vmactions, as a second check on top of the jezebel guests.
 4. **Chocolate + Crispy**: shared patch series. *Exit:* `-pstest` green on all five guests.
 5. **GZDoom + UZDoom**: native bindings + `psdoom.pk3`, one series rebased onto both pins. *Exit:* `-pstest` green on Debian/FreeBSD/Haiku
    at least (GZDoom on OpenBSD/NetBSD depends on GL availability in the guest).
-6. **Containers + k8s backends**. *Exit:* kill a busybox container and a k3s pod from og and Chocolate.
+6. **Hook interop**: the `cmd` backend proven against psdoom-ng1's documented protocol, plus example
+   helpers in `contrib/` (`docker ps`, `kubectl get pods`) as samples, not supported backends.
+   *Exit:* og and Chocolate drive a fake helper and a slow helper without frame hitches.
 7. **Tier 2 engines**: DSDA-Doom, Woof!.
 8. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
    builtins, plus a QuakeC mod (`psquake`) that spawns grunts/enforcers for processes and shamblers
@@ -250,7 +260,8 @@ vmactions, as a second check on top of the jezebel guests.
 9. **Stretch: Quake 3**: no engine patch. A native `qagame` mod for ioquake3/Quake3e (`vm_game 0`)
    links libpsd, and processes become bots named `pid:comm` (Q3 has no monsters). First hit renices,
    a frag kills. Test assets: OpenArena (free), on a custom arena with AAS.
-10. **Release**: tagged source releases; packaging (AUR, FreeBSD port, HaikuPorts recipe) as
+10. **Release**: tagged source releases; optionally a kubedoom-compatible image built on
+    psdoom-plus (offered upstream to kubedoom rather than as a rival); packaging (AUR, FreeBSD port, HaikuPorts recipe) as
     follow-up.
 
 ## Open items

@@ -1,5 +1,5 @@
 #!/bin/sh
-# psd - psdoom-plus developer CLI
+# psdev - psdoom-plus developer CLI (not installed; psdoom-ng1 owns the name `psd`)
 #
 # Copyright (C) 2026 psdoom-plus contributors
 # SPDX-License-Identifier: GPL-2.0-or-later
