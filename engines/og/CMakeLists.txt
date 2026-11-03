@@ -29,6 +29,9 @@ add_executable(psdoom-og ${OG_C}
     psdoom/p_psdoom.c)
 target_include_directories(psdoom-og PRIVATE ${OG_SRC} platform psdoom)
 target_link_libraries(psdoom-og PRIVATE psd SDL3::SDL3 m)
+if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
+    target_link_libraries(psdoom-og PRIVATE network)   # sockets for i_net.c
+endif()
 
 # Vanilla Doom relies on 32-bit wrapping arithmetic and loose aliasing.
 target_compile_definitions(psdoom-og PRIVATE NORMALUNIX PSDOOM_PLUS

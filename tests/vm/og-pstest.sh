@@ -35,8 +35,12 @@ bad() { echo "  FAIL $*"; fail=$((fail + 1)); }
 
 # exit status of a reaped child in $status: 128+9 = KILL, 128+15 = TERM,
 # 999 = still running. (Not via $(...): a subshell can't wait for our children.)
+is_zombie() {  # Haiku's ps has no -o: there, trust kill -0 alone
+	ps -o stat= -p "$1" 2>/dev/null | grep -q Z
+}
+
 reap() {
-	if kill -0 "$1" 2>/dev/null && ! ps -o stat= -p "$1" 2>/dev/null | grep -q Z; then
+	if kill -0 "$1" 2>/dev/null && ! is_zombie "$1"; then
 		status=999
 		return
 	fi

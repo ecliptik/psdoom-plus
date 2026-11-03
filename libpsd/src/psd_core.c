@@ -83,6 +83,7 @@ static const char *const builtin_protect[] = {
 	"tmux", "tmux:*", "screen", "SCREEN",
 	/* Haiku */
 	"kernel_team", "app_server", "input_server", "registrar", "debug_server",
+	"net_server",                /* Haiku's network stack: ssh sessions die with it */
 	NULL
 };
 
@@ -643,6 +644,11 @@ int psd_needs_confirm(psd_ctx *ctx, long pid)
 {
 	track *t = find_track(ctx, pid);
 
+#ifdef __HAIKU__
+	(void)t;
+	return 0;                    /* everything runs as uid 0 on Haiku */
+#else
 	return t != NULL && ctx->cfg.mode == PSD_MODE_MODERN && !ctx->cfg.no_act &&
 	       t->p.uid == 0;
+#endif
 }

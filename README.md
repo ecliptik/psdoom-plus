@@ -8,7 +8,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 
 | Engine | Status |
 |---|---|
-| og (id's linuxdoom-1.10 + SDL3) | **playable on Linux** |
+| og (id's linuxdoom-1.10 + SDL3) | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | Chocolate Doom, Crispy Doom | planned |
 | GZDoom, UZDoom | planned |
 | DSDA-Doom, Woof! | planned |
@@ -23,8 +23,8 @@ work unchanged.
 > nothing is protected: it will happily kill your shell, your desktop or itself. Try it in a
 > throwaway VM first.
 
-The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux today; the other engines and
-platforms follow. See [PLAN.md](PLAN.md) for the design and the phases.
+The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux, FreeBSD, OpenBSD, NetBSD and
+Haiku today; the other engines follow. See [PLAN.md](PLAN.md) for the design and the phases.
 
 ```sh
 tools/psdev build og                       # fetch id's source, apply engines/og/patches, build

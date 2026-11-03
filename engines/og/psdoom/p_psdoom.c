@@ -419,6 +419,10 @@ static void test_ticker (void)
 		continue;
 	    test_pids[test_ntargets++] = p->pid;
 	}
+	// a crowded level may not have room for it yet: psDooM places it on a
+	// later poll, so wait a while for a target before giving up
+	if (test_ntargets == 0 && leveltime < 35 * 15)
+	    return;
 	for (i = 0; i < test_ntargets; i++)
 	{
 	    psmon_t* m = find_mon (test_pids[i]);

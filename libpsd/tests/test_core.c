@@ -433,7 +433,11 @@ static void confirm_root_kills_in_modern(void)
 	world("root");
 	ctx = open_with(PSD_MODE_MODERN, 0, NULL);
 	psd_poll(ctx, on_event, &r);
+#ifdef __HAIKU__
+	CHECK(!psd_needs_confirm(ctx, 60));          /* everything is uid 0 there */
+#else
 	CHECK(psd_needs_confirm(ctx, 60));           /* root's cron */
+#endif
 	CHECK(!psd_needs_confirm(ctx, 1100));
 	psd_close(ctx);
 

@@ -21,6 +21,27 @@
 #include "psd_internal.h"
 #include "psd_test.h"
 
+#ifdef __HAIKU__
+#include <OS.h>
+/* Haiku renices by lowering thread priorities: report the lowest one as a nice */
+static int nice_of(pid_t pid)
+{
+	thread_info th;
+	int32 cookie = 0, lowest = B_NORMAL_PRIORITY;
+
+	while (get_next_thread_info(pid, &cookie, &th) == B_OK)
+		if (th.priority < lowest)
+			lowest = th.priority;
+	return lowest < B_NORMAL_PRIORITY ? 5 : 0;
+}
+#else
+static int nice_of(pid_t pid)
+{
+	errno = 0;
+	return getpriority(PRIO_PROCESS, (id_t)pid);
+}
+#endif
+
 typedef struct rec {
 	long pids[1024];
 	int n;
@@ -128,8 +149,7 @@ static void classic_renice_and_kill(void)
 
 	psd_poll(ctx, on_event, &r);
 	CHECK_EQ(psd_wound(ctx, a, 70, 100), PSD_OK);
-	errno = 0;
-	CHECK_EQ(getpriority(PRIO_PROCESS, (id_t)a), 5);
+	CHECK_EQ(nice_of(a), 5);
 	CHECK_EQ(psd_kill(ctx, a), PSD_OK);
 	CHECK(died_by(a, SIGKILL));
 	psd_close(ctx);

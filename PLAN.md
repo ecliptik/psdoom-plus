@@ -288,8 +288,12 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    `-pstest`/`-pstestview`. *Exit met:* `tools/psdev test og --vm debian`: 8/8 with real signals
    (classic SIGKILL, modern TERM→KILL, protected decoy untouched, audit log), screenshots taken.
    PSDBOXES lumps moved to the "any map" work.
-3. **BSD + Haiku backends**: freebsd/openbsd/netbsd/haiku. *Exit:* unit tests + og `-pstest` green on all
-   five guests.
+3. ✅ **BSD + Haiku backends** (2026-11-03): FreeBSD (`KERN_PROC_PROC`), OpenBSD/NetBSD (`KERN_PROC` /
+   `KERN_PROC2`, one file), Haiku (teams; `setpriority` is a no-op there, so renice lowers thread
+   priorities; everything runs as uid 0, so no root confirmation). og patch 0006 for BSD/Haiku libc
+   differences. *Exit met:* libpsd 5/5 and og 8/8 (real signals) on Debian 13, FreeBSD 15.1,
+   OpenBSD 7.9, NetBSD 11.0 and Haiku R1/beta6. Guest notes: OpenBSD needs the X11 base set for
+   SDL3; NetBSD has no pkgin in a minimal install (bootstrap uses `pkg_add`).
 4. **Chocolate + Crispy**: shared patch series. *Exit:* `-pstest` green on all five guests.
 5. **GZDoom + UZDoom**: native bindings + `psdoom.pk3`, one series rebased onto both pins. *Exit:* `-pstest` green on Debian/FreeBSD/Haiku
    at least (GZDoom on OpenBSD/NetBSD depends on GL availability in the guest).

@@ -5,10 +5,14 @@ Subject: [PATCH 6/6] Portability: BSD and Haiku
 
 - i_net.c: IPPORT_USERRESERVED is Linux-only; use its value (5000).
 - m_bbox.h: <values.h> is glibc-only; MAXINT/MININT come from doomtype.h.
+- w_wad.c: Haiku's libc has its own strupr(); call ours W_StrUpr.
+- wi_stuff.c: the 'time' patch variable shadows time(); rename it.
 ---
- linuxdoom-1.10/i_net.c  | 5 +++++
- linuxdoom-1.10/m_bbox.h | 2 +-
- 2 files changed, 6 insertions(+), 1 deletion(-)
+ linuxdoom-1.10/i_net.c    | 5 +++++
+ linuxdoom-1.10/m_bbox.h   | 2 +-
+ linuxdoom-1.10/w_wad.c    | 4 ++--
+ linuxdoom-1.10/wi_stuff.c | 8 ++++----
+ 4 files changed, 12 insertions(+), 7 deletions(-)
 
 diff --git a/linuxdoom-1.10/i_net.c b/linuxdoom-1.10/i_net.c
 index 557f417..1970537 100644
@@ -38,4 +42,66 @@ index 66be2fb..c50727f 100644
 +#include "doomtype.h"	// MAXINT/MININT (psdoom-plus: no <values.h>)
  
  #include "m_fixed.h"
+ 
+diff --git a/linuxdoom-1.10/w_wad.c b/linuxdoom-1.10/w_wad.c
+index e7b5ba9..976ede3 100644
+--- a/linuxdoom-1.10/w_wad.c
++++ b/linuxdoom-1.10/w_wad.c
+@@ -65,7 +65,7 @@ void**			lumpcache;
+ 
+ #define strcmpi	strcasecmp
+ 
+-void strupr (char* s)
++void W_StrUpr (char* s)
+ {
+     while (*s) { *s = toupper(*s); s++; }
+ }
+@@ -366,7 +366,7 @@ int W_CheckNumForName (char* name)
+     name8.s[8] = 0;
+ 
+     // case insensitive
+-    strupr (name8.s);		
++    W_StrUpr (name8.s);		
+ 
+     v1 = name8.x[0];
+     v2 = name8.x[1];
+diff --git a/linuxdoom-1.10/wi_stuff.c b/linuxdoom-1.10/wi_stuff.c
+index 01502c8..aa7ca00 100644
+--- a/linuxdoom-1.10/wi_stuff.c
++++ b/linuxdoom-1.10/wi_stuff.c
+@@ -373,7 +373,7 @@ static patch_t*		items;
+ static patch_t*		frags;
+ 
+ // Time sucks.
+-static patch_t*		time;
++static patch_t*		timepatch;	// was 'time' (clashes with time())
+ static patch_t*		par;
+ static patch_t*		sucks;
+ 
+@@ -1456,7 +1456,7 @@ void WI_drawStats(void)
+     V_DrawPatch(SP_STATSX, SP_STATSY+2*lh, FB, sp_secret);
+     WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY+2*lh, cnt_secret[0]);
+ 
+-    V_DrawPatch(SP_TIMEX, SP_TIMEY, FB, time);
++    V_DrawPatch(SP_TIMEX, SP_TIMEY, FB, timepatch);
+     WI_drawTime(SCREENWIDTH/2 - SP_TIMEX, SP_TIMEY, cnt_time);
+ 
+     if (wbs->epsd < 3)
+@@ -1669,7 +1669,7 @@ void WI_loadData(void)
+     colon = W_CacheLumpName("WICOLON", PU_STATIC); 
+ 
+     // "time"
+-    time = W_CacheLumpName("WITIME", PU_STATIC);   
++    timepatch = W_CacheLumpName("WITIME", PU_STATIC);   
+ 
+     // "sucks"
+     sucks = W_CacheLumpName("WISUCKS", PU_STATIC);  
+@@ -1752,7 +1752,7 @@ void WI_unloadData(void)
+     Z_ChangeTag(sp_secret, PU_CACHE);
+     Z_ChangeTag(items, PU_CACHE);
+     Z_ChangeTag(frags, PU_CACHE);
+-    Z_ChangeTag(time, PU_CACHE);
++    Z_ChangeTag(timepatch, PU_CACHE);
+     Z_ChangeTag(sucks, PU_CACHE);
+     Z_ChangeTag(par, PU_CACHE);
  

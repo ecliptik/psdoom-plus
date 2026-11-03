@@ -59,8 +59,10 @@ OpenBSD)
 NetBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf SDL3"
+	# no pkgin in a minimal install: pkg_add from the binary package repo
+	repo="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -m)/$(uname -r | cut -d_ -f1)/All"
 	# shellcheck disable=SC2086
-	sudo pkgin -y install $pkgs ;;
+	sudo env PKG_PATH="$repo" /usr/sbin/pkg_add -U $pkgs ;;
 Haiku)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs libsdl3_devel"
