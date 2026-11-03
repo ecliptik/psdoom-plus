@@ -1,0 +1,31 @@
+# build output
+/build/
+/out/
+*.o
+*.a
+*.so
+*.dylib
+
+# fetched upstream engines (tools/psd fetch)
+/engines/*/src/
+
+# IWADs are never committed (use Freedoom for tests)
+*.WAD
+doom.wad
+doom1.wad
+doom2.wad
+doomu.wad
+plutonia.wad
+tnt.wad
+freedoom1.wad
+freedoom2.wad
+freedm.wad
+
+# test artefacts
+/tests/out/
+*.pcx
+screenshot*.png
+
+# editors
+*~
+.*.swp

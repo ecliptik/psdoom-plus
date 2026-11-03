@@ -1,0 +1,73 @@
+#!/bin/sh
+# psd - psdoom-plus developer CLI
+#
+# Copyright (C) 2026 psdoom-plus contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# POSIX sh on purpose: it has to run on Linux, the BSDs and Haiku.
+
+set -eu
+
+PROG=${0##*/}
+
+# Test VMs: clean-install guests on an isolated network, controlled through
+# a forced-command ssh key (one verb, one guest per call). Override for other labs.
+PSD_VM_CTL_HOST=${PSD_VM_CTL_HOST:-micheal@jezebel.hale-gopher.ts.net}
+PSD_VM_CTL_KEY=${PSD_VM_CTL_KEY:-$HOME/.ssh/testvm-ctl}
+PSD_VM_OSES="debian freebsd openbsd netbsd haiku"
+
+usage() {
+	cat <<EOF
+usage: $PROG <command> [args]
+
+  vm list                       test guests psdoom-plus uses
+  vm status|start|stop|revert <os>
+                                control a test guest (os: ${PSD_VM_OSES})
+  vm ssh <os> [command...]      shell / command in a running guest
+
+  fetch <engine>                fetch an upstream engine at its pinned tag   (phase 2+)
+  build <engine>                apply patches and build                      (phase 2+)
+  test  [unit|<engine>]         run tests                                    (phase 1+)
+
+Real kill/renice runs only inside the test guests, never on a machine you use.
+EOF
+}
+
+die() { echo "$PROG: $*" >&2; exit 1; }
+
+vm_os_ok() {
+	for o in $PSD_VM_OSES; do [ "$o" = "$1" ] && return 0; done
+	die "unknown os '$1' (one of: $PSD_VM_OSES)"
+}
+
+cmd_vm() {
+	[ $# -ge 1 ] || { usage; exit 1; }
+	verb=$1; shift
+	case $verb in
+	list)
+		for o in $PSD_VM_OSES; do echo "tv-$o"; done ;;
+	status|start|stop|revert)
+		[ $# -eq 1 ] || die "vm $verb needs one os"
+		vm_os_ok "$1"
+		[ -r "$PSD_VM_CTL_KEY" ] || die "no control key at $PSD_VM_CTL_KEY"
+		exec ssh -i "$PSD_VM_CTL_KEY" -o IdentitiesOnly=yes \
+			"$PSD_VM_CTL_HOST" "$verb" "tv-$1" ;;
+	ssh)
+		[ $# -ge 1 ] || die "vm ssh needs an os"
+		vm_os_ok "$1"; os=$1; shift
+		exec ssh "tv-$os" "$@" ;;
+	*)
+		die "unknown vm command '$verb'" ;;
+	esac
+}
+
+not_yet() { die "'$1' is not implemented yet (see PLAN.md, phases)"; }
+
+[ $# -ge 1 ] || { usage; exit 1; }
+cmd=$1; shift
+case $cmd in
+vm)              cmd_vm "$@" ;;
+fetch|build|test) not_yet "$cmd" ;;
+-h|--help|help)  usage ;;
+*)               usage; exit 1 ;;
+esac
