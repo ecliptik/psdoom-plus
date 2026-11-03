@@ -15,8 +15,15 @@ set(PSD_SOURCES
     src/backend_mock.c
 )
 
+# native process table
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND PSD_SOURCES src/backend_linux.c)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    list(APPEND PSD_SOURCES src/backend_freebsd.c src/backend_posix.c)
+elseif(CMAKE_SYSTEM_NAME MATCHES "^(OpenBSD|NetBSD)$")
+    list(APPEND PSD_SOURCES src/backend_openbsd.c src/backend_posix.c)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
+    list(APPEND PSD_SOURCES src/backend_haiku.c src/backend_posix.c)
 else()
     list(APPEND PSD_SOURCES src/backend_none.c)
 endif()

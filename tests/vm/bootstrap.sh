@@ -40,7 +40,20 @@ FreeBSD)
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
 	pkgs="cmake"
-	[ $want_engines -eq 1 ] && pkgs="$pkgs sdl3"
+	if [ $want_engines -eq 1 ]; then
+		pkgs="$pkgs sdl3"
+		# SDL3 links against xcb from the X11 base set, which a minimal
+		# install leaves out: add the xbase set (disposable guests only)
+		if ! ls /usr/X11R6/lib/libxcb.so.* >/dev/null 2>&1; then
+			v=$(uname -r | tr -d .)
+			set_url="https://cdn.openbsd.org/pub/OpenBSD/$(uname -r)/$(uname -m)/xbase$v.tgz"
+			echo "bootstrap: installing the X11 base set ($set_url)"
+			ftp -o /tmp/xbase.tgz "$set_url"
+			doas tar -C / -xzphf /tmp/xbase.tgz
+			rm -f /tmp/xbase.tgz
+			doas ldconfig -m /usr/X11R6/lib
+		fi
+	fi
 	# shellcheck disable=SC2086
 	doas pkg_add -I $pkgs ;;
 NetBSD)

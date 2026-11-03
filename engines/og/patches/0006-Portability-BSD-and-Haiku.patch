@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 15:25:08 -0800
+Subject: [PATCH 6/6] Portability: BSD and Haiku
+
+- i_net.c: IPPORT_USERRESERVED is Linux-only; use its value (5000).
+- m_bbox.h: <values.h> is glibc-only; MAXINT/MININT come from doomtype.h.
+---
+ linuxdoom-1.10/i_net.c  | 5 +++++
+ linuxdoom-1.10/m_bbox.h | 2 +-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/linuxdoom-1.10/i_net.c b/linuxdoom-1.10/i_net.c
+index 557f417..1970537 100644
+--- a/linuxdoom-1.10/i_net.c
++++ b/linuxdoom-1.10/i_net.c
+@@ -35,6 +35,11 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
+ #include <netdb.h>
+ #include <sys/ioctl.h>
+ 
++// psdoom-plus: only Linux defines this (BSD and Haiku do not)
++#ifndef IPPORT_USERRESERVED
++#define IPPORT_USERRESERVED 5000
++#endif
++
+ #include "i_system.h"
+ #include "d_event.h"
+ #include "d_net.h"
+diff --git a/linuxdoom-1.10/m_bbox.h b/linuxdoom-1.10/m_bbox.h
+index 66be2fb..c50727f 100644
+--- a/linuxdoom-1.10/m_bbox.h
++++ b/linuxdoom-1.10/m_bbox.h
+@@ -23,7 +23,7 @@
+ #ifndef __M_BBOX__
+ #define __M_BBOX__
+ 
+-#include <values.h>
++#include "doomtype.h"	// MAXINT/MININT (psdoom-plus: no <values.h>)
+ 
+ #include "m_fixed.h"
+ 
