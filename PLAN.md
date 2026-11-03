@@ -223,10 +223,11 @@ The existing clean-install **testvm** guests on jezebel are used. No new VMs nee
 
 ### Test layers
 
-1. **libpsd unit tests** run on every guest. They fork sacrificial children under a dedicated
-   `psdtest` user, then assert that the children are listed, that renice gives nice=+5, that kill
-   gives the child reaped, that filters work, and that the diff logic is correct. The mock backend
-   covers the logic on any host.
+1. **libpsd unit tests** (`tools/psdev test unit [--vm <os>]`) run on every guest. The native tests
+   fork their own `sleep` children and only ever signal those, so they are safe anywhere: children
+   are listed, renice gives nice=5, kill reaps them by SIGKILL, modern TERM→KILL escalates, and a
+   recycled-pid identity is refused. The mock backend covers the core logic (filters, protection,
+   resurrection, caps, dry run) and the cmd tests use a fake psdoom-ng helper.
 2. **Engine integration**: a `-pstest N` mode in each engine glue spawns pid monsters for the
    `psdtest` user's `sleep` processes, damages and kills N of them through the normal damage path,
    writes a screenshot and exits. The harness checks the `sleep`s are gone and the screenshot exists.
@@ -278,9 +279,9 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 
 ## Phases
 
-0. **Bootstrap**: git repo → `ecliptik/psdoom-plus`; import `orig/` as reference (original tarballs
+0. ✅ **Bootstrap**: git repo → `ecliptik/psdoom-plus`; import `orig/` as reference (original tarballs
    plus the reconstructed 2000.05.03.b tree); README, LICENSE, `tools/psdev` skeleton; vault project card.
-1. **libpsd core**: API, diff/resurrect logic ported from `pr_process.c`, Linux + mock + cmd
+1. ✅ **libpsd core** (2026-11-03): API, diff/resurrect logic ported from `pr_process.c`, Linux + mock + cmd
    (psdoom-ng env vars) backends, unit tests. *Exit:* unit tests green on tv-debian.
 2. **og (linuxdoom via doomgeneric)**: port the ~60 hunks onto libpsd, own SDL3 backend, PSDBOXES, psdoom1/2.wad,
    `-pstest`. *Exit:* on tv-debian, shooting a `sleep` monster kills the process (screenshot taken).

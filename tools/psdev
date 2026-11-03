@@ -27,7 +27,8 @@ usage: $PROG <command> [args]
 
   fetch <engine>                fetch an upstream engine at its pinned tag   (phase 2+)
   build <engine>                apply patches and build                      (phase 2+)
-  test  [unit|<engine>]         run tests                                    (phase 1+)
+  test unit [--vm <os>]         build libpsd and run its unit tests, here or in a guest
+                                (the guest gets a fresh copy of the tree and its deps)
 
 Real kill/renice runs only inside the test guests, never on a machine you use.
 EOF
@@ -63,11 +64,54 @@ cmd_vm() {
 
 not_yet() { die "'$1' is not implemented yet (see PLAN.md, phases)"; }
 
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
+# Files a guest needs: tracked + untracked-but-not-ignored, minus history.
+ship_tree() {
+	(cd "$ROOT" && git ls-files -co --exclude-standard | grep -v -e '^orig/' -e '^data/' |
+		tar -cf - -T -)
+}
+
+unit_local() {
+	b="$ROOT/build/libpsd"
+	cmake -S "$ROOT/libpsd" -B "$b" -DPSD_WERROR=ON >/dev/null
+	cmake --build "$b"
+	(cd "$b" && ctest --output-on-failure)
+}
+
+unit_vm() {
+	os=$1
+	vm_os_ok "$os"
+	echo "== shipping tree to tv-$os"
+	ship_tree | ssh "tv-$os" 'rm -rf psdoom-plus && mkdir psdoom-plus && tar -xf - -C psdoom-plus'
+	echo "== bootstrap + build + test on tv-$os"
+	ssh "tv-$os" 'cd psdoom-plus && sh tests/vm/bootstrap.sh &&
+		cmake -S libpsd -B build/libpsd -DPSD_WERROR=ON >/dev/null &&
+		cmake --build build/libpsd &&
+		cd build/libpsd && ctest --output-on-failure'
+}
+
+cmd_test() {
+	[ $# -ge 1 ] || die "test needs a target (unit)"
+	what=$1; shift
+	case $what in
+	unit)
+		if [ $# -ge 2 ] && [ "$1" = "--vm" ]; then
+			unit_vm "$2"
+		else
+			unit_local
+		fi ;;
+	*)
+		not_yet "test $what" ;;
+	esac
+}
+
 [ $# -ge 1 ] || { usage; exit 1; }
 cmd=$1; shift
 case $cmd in
 vm)              cmd_vm "$@" ;;
-fetch|build|test) not_yet "$cmd" ;;
+test)            cmd_test "$@" ;;
+fetch|build)     not_yet "$cmd" ;;
 -h|--help|help)  usage ;;
 *)               usage; exit 1 ;;
 esac

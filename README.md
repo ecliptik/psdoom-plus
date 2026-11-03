@@ -23,15 +23,18 @@ work unchanged.
 > nothing is protected: it will happily kill your shell, your desktop or itself. Try it in a
 > throwaway VM first.
 
-Nothing is playable yet. See [PLAN.md](PLAN.md) for the design and the phases.
+Nothing is playable yet: `libpsd` (the process side, Linux for now) is done and tested; the engines
+come next. See [PLAN.md](PLAN.md) for the design and the phases.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `PLAN.md` | design, decisions and phases |
+| `libpsd/` | the process library every engine links: backends, kill modes, audit log ([API](libpsd/include/psd.h)) |
 | `data/` | the original psDooM custom levels `psdoom1.wad` (Doom) and `psdoom2.wad` (Doom II) |
-| `tools/psdev` | developer CLI (test VMs now; fetch/build/test as phases land) |
+| `tools/psdev` | developer CLI: test VMs, `test unit [--vm <os>]` |
+| `tests/vm/` | guest bootstrap |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |
 
 ## Credits
