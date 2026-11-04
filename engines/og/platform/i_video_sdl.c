@@ -51,15 +51,35 @@ static void InitSurfaceVideo(void)
 	                          M_CheckParm("-window") ? 0 : SDL_WINDOW_FULLSCREEN);
 	if (window == NULL)
 		I_Error("I_InitGraphics: %s", SDL_GetError());
+	// exactly WxH: 8-bit first, then any depth (the blit converts). Never
+	// SDL's closest match: on a Mach64 under UniVBE that picked 512x384,
+	// which capture devices cannot lock to (dossage, 2026-09-03).
 	modes = SDL_GetFullscreenDisplayModes(SDL_GetPrimaryDisplay(), &n);
-	for (i = 0; modes && i < n; i++)
-		if (modes[i]->w == w && modes[i]->h == h &&
-		    modes[i]->format == SDL_PIXELFORMAT_INDEX8) {
-			SDL_SetWindowFullscreenMode(window, modes[i]);
-			break;
-		}
+	{
+		const SDL_DisplayMode *pick = NULL;
+
+		for (i = 0; modes && i < n && !pick; i++)
+			if (modes[i]->w == w && modes[i]->h == h &&
+			    modes[i]->format == SDL_PIXELFORMAT_INDEX8)
+				pick = modes[i];
+		for (i = 0; modes && i < n && !pick; i++)
+			if (modes[i]->w == w && modes[i]->h == h)
+				pick = modes[i];
+		if (pick)
+			SDL_SetWindowFullscreenMode(window, pick);
+		else
+			printf("I_InitGraphics: no %dx%d mode offered\n", w, h);
+	}
 	SDL_free(modes);
 	SDL_SyncWindow(window);
+	{
+		// say what we got: a black capture must be told apart from a hang
+		const SDL_DisplayMode *cur = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+
+		if (cur)
+			printf("I_InitGraphics: %dx%d %d bpp\n", cur->w, cur->h,
+			       SDL_BITSPERPIXEL(cur->format));
+	}
 	shadow8 = SDL_CreateSurfaceFrom(SCREENWIDTH, SCREENHEIGHT, SDL_PIXELFORMAT_INDEX8,
 	                                screens[0], SCREENWIDTH);
 	if (shadow8 == NULL || SDL_CreateSurfacePalette(shadow8) == NULL ||

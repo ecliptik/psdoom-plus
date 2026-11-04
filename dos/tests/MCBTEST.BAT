@@ -1,7 +1,8 @@
 @ECHO OFF
 REM MCBTEST.BAT - psdoom-plus memory-chain test (DOSBox-X and real hardware)
 REM   MCBTEST <iwad> [psdoom options] [command after each game]
-REM e.g. MCBTEST FREEDOOM.WAD -640 MODE12   (results: PS?.TXT C?.TXT M?.TXT PSD.LOG)
+REM e.g. MCBTEST FREEDOOM.WAD -640 C:\VGACAP\MODE12.COM
+REM (results: PS?.TXT C?.TXT M?.TXT PSD.LOG CLASSIC.PPM DONE.TXT)
 REM Loads TSRs that stay resident: reboot afterwards. Check with check-mcb.sh.
 IF "%1"=="" GOTO usage
 DEL PS?.TXT > NUL
