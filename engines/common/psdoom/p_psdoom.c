@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -56,6 +57,15 @@ static int	test_state;		// 0 off, 1 waiting for targets, 2 waiting for removal
 static int	test_deadline;		// leveltime
 static long	test_pids[64];
 static int	test_ntargets, test_nremoved;
+static long long	test_last_ms, test_max_gap;	// longest wall-clock gap between tics
+
+static long long now_ms (void)
+{
+    struct timespec ts;
+
+    clock_gettime (CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static char	msgbuf[80];
 
@@ -386,9 +396,9 @@ static void test_finish (int code)
 {
     if (test_shot)
 	PSE_Screenshot (test_shot);
-    printf ("PSTEST mode=%s targeted=%d removed=%d result=%s\n",
+    printf ("PSTEST mode=%s targeted=%d removed=%d result=%s maxtic=%lldms\n",
 	    psd_mode_of (ctx) == PSD_MODE_CLASSIC ? "classic" : "modern",
-	    test_ntargets, test_nremoved, code == 0 ? "ok" : "fail");
+	    test_ntargets, test_nremoved, code == 0 ? "ok" : "fail", test_max_gap);
     fflush (stdout);
     psd_close (ctx);
     ctx = NULL;
@@ -467,7 +477,15 @@ void PS_Ticker (void)
     if (leveltime > 0 && leveltime % poll_interval == 0)
 	psd_poll (ctx, on_event, NULL);
     if (test_state)
+    {
+	long long t = now_ms ();
+	// a stalled game loop runs the missed tics back to back afterwards,
+	// so the stall shows up as one long gap
+	if (test_last_ms && leveltime > 35 && t - test_last_ms > test_max_gap)
+	    test_max_gap = t - test_last_ms;
+	test_last_ms = t;
 	test_ticker ();
+    }
 }
 
 // ------------------------------------------------------------------

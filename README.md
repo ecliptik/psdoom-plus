@@ -42,6 +42,7 @@ tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-c
 | `libpsd/` | the process library every engine links: backends, kill modes, audit log ([API](libpsd/include/psd.h)) |
 | `data/` | the original psDooM custom levels `psdoom1.wad` (Doom) and `psdoom2.wad` (Doom II) |
 | `tools/psdev` | developer CLI: test VMs, `test unit [--vm <os>]` |
+| `contrib/helpers/` | example psdoom-ng hook helpers: Docker containers, Kubernetes pods |
 | `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
 | `tests/vm/` | guest bootstrap and end-to-end tests (`tools/psdev test og --vm debian`) |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |

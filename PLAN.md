@@ -299,9 +299,12 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    all five guests. Built without SDL2_mixer/SDL2_net (sound effects yes, music and netgames no).
 5. **GZDoom + UZDoom**: native bindings + `psdoom.pk3`, one series rebased onto both pins. *Exit:* `-pstest` green on Debian/FreeBSD/Haiku
    at least (GZDoom on OpenBSD/NetBSD depends on GL availability in the guest).
-6. **Hook interop**: the `cmd` backend proven against psdoom-ng1's documented protocol, plus example
-   helpers in `contrib/` (`docker ps`, `kubectl get pods`) as samples, not supported backends.
-   *Exit:* og and Chocolate drive a fake helper and a slow helper without frame hitches.
+6. ✅ **Hook interop** (2026-11-03): the `cmd` backend speaks psdoom-ng's protocol
+   (`PSDOOM_NG_PS_CMD`/`_RENICE_CMD`/`_KILL_CMD`), asynchronously. Example helpers in
+   `contrib/helpers/` (`docker.sh`: containers by main pid; `kubectl.sh`: pods, kubedoom-style),
+   samples rather than supported backends, checked against fake docker/kubectl by
+   `tests/helpers/run.sh`. *Exit met:* with a helper that takes 2 s per listing, og and Chocolate
+   keep their longest tic gap at 30-31 ms (`-pstest` reports `maxtic`), same as with an instant one.
 7. **DOS (og)**: the SDL3 backend under DJGPP via the hub's `shared/` layer, the `mcb` backend, then
    `psdoomd` + the `net` backend. *Exit:* in DOSBox-X, shooting a TSR frees it and shooting a remote
    monster kills a `sleep` in a tv-\* guest; then the same on a real-hardware rig.
