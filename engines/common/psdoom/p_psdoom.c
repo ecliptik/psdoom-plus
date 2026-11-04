@@ -500,9 +500,9 @@ static void test_finish (int code)
 {
     if (test_shot)
 	PSE_Screenshot (test_shot);
-    printf ("PSTEST mode=%s targeted=%d removed=%d result=%s maxtic=%lldms\n",
+    printf ("PSTEST mode=%s targeted=%d removed=%d result=%s maxtic=%lldms target=%s\n",
 	    psd_mode_of (ctx) == PSD_MODE_CLASSIC ? "classic" : "modern",
-	    test_ntargets, test_nremoved, code == 0 ? "ok" : "fail", test_max_gap);
+	    test_ntargets, test_nremoved, code == 0 ? "ok" : "fail", test_max_gap, test_glob);
     fflush (stdout);
     psd_close (ctx);
     ctx = NULL;

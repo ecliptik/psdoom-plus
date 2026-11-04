@@ -29,6 +29,11 @@ pstest M2
 [ "$(count PS5 HOOKTSR)" = 1 ] && ok "modern does not free HOOKTSR (INT F1h points into it)" || bad "modern freed HOOKTSR (PS5)"
 pstest M3
 [ "$(count PS6 COMMAND)" -ge 1 ] && ok "modern does not free COMMAND.COM (our parent)" || bad "COMMAND gone (PS6)"
+echo "== modern: a TSR further down an interrupt chain is protected"
+pstest M4
+[ "$(count PS7 CHAINTSR)" = 1 ] && tr -d '\r' < "$(f PS7.TXT)" | grep " HOOKTSR " | grep -q protected &&
+	ok "HOOKTSR behind CHAINTSR is still protected (PS7)" || bad "HOOKTSR behind CHAINTSR not protected (PS7)"
+[ "$(count PS8 HOOKTSR)" = 1 ] && ok "modern does not free HOOKTSR from the middle of the chain (PS8)" || bad "modern freed a mid-chain HOOKTSR (PS8)"
 echo "== audit log"
 # a protected monster is invulnerable, so modern never even asks to kill it
 if [ "$(tr -d '\r' < "$log" 2>/dev/null | grep -c "mode=classic .*action=kill .*name=TSR result=ok")" = 2 ] &&
@@ -38,6 +43,8 @@ if [ "$(tr -d '\r' < "$log" 2>/dev/null | grep -c "mode=classic .*action=kill .*
 else
 	bad "audit log (PSD.LOG)"
 fi
+echo "== resident programs left unprotected in modern mode (PS0, informational)"
+tr -d '\r' < "$(f PS0.TXT)" 2>/dev/null | awk '$5 == "program" && $6 == "-" && $3 != "TSR" {print}'
 echo "== drivers seen (PS0, informational)"
 tr -d '\r' < "$(f PS0.TXT)" 2>/dev/null | grep " driver " || echo "  (none: DOSBox-X loads no CONFIG.SYS drivers)"
 echo "== $pass passed, $fail failed   ($out)"

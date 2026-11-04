@@ -347,8 +347,19 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
      through psdoomd; a modern psdoomd refuses an `Xorg` decoy to a classic client; a classic one
      lets it be SIGKILLed; psdoomd's audit log has all of it. `tests/net/run.sh` 21/21 (TCP, UDP,
      paging, replay; og and Woof! as clients).
-   - Remaining: the same on a real-hardware rig (vcctrl, owner-scheduled), and CONFIG.SYS device
-     drivers as monsters (DOSBox-X loads none, so `backend_dos.c`'s driver path is untested).
+   - ✅ **Real hardware** (2026-11-04, Gateway 2000: 486DX2-66, Mach64 CT under UniVBE 6.70,
+     PicoGUS as SB 2.0, MS-DOS 6.22; vcctrl drove it, booked through sdlports). SMOKE: MAP01 at
+     640x480 8 bpp (`-640`, which the capture stick can lock; mode 13h's 70 Hz it cannot), SB
+     sound, no hang. MCBTEST: `check-mcb.sh` 10/10 (`tests/out/g2k/20261104/`). Worst tic gap at
+     640x480 ~170-190 ms (one sample, not a benchmark). Real-hardware finding: modern mode's
+     interrupt guard only saw the head of each chain, so UNIVBE, DOSKEY and MSCDEX (behind
+     CTMOUSE/SMARTDRV) showed as unprotected. Fixed: blocks a vector points into are scanned for
+     saved CS:IP handler pointers into other programs (CS at or above the PSP, IP past its
+     header), transitively, cached per arena+IVT; CHAINTSR.COM reproduces it in DOSBox-X
+     (`check-mcb.sh` 12/12). Only one CONFIG.SYS driver (VIDECDD, in a UMB "SD" block) was found;
+     HIMEM/EMM386 did not appear, so the conventional SD walk needs `PSDPS -v` from the rig.
+   - Remaining: `CHAINCHK.BAT` on the Gateway (PSDPS only: the chain fix against UNIVBE/DOSKEY/
+     MSCDEX, and the raw MCB/SD dump for the driver walk); the optional NET leg.
 
 8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
    per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random

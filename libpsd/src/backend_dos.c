@@ -12,7 +12,8 @@
  *              protects our own PSP and the COMMAND.COM above it
  *   is_daemon  device drivers (Demons); programs are Shotgun guys
  *   is_kernel  modern mode's "never": CWSDPMI (our DPMI host), any block an
- *              interrupt vector points into, any driver still in the DOS
+ *              interrupt vector points into, any program further down one
+ *              of those interrupt chains, any driver still in the DOS
  *              device chain. Freeing those hangs the PC on the next call.
  *
  * Killing a program frees every block it owns (owner word := 0), as
@@ -63,6 +64,10 @@ typedef struct {
 	unsigned hidden[MAX_HIDDEN];  /* drivers unlinked by a classic kill */
 	size_t nhidden;
 	char user[PSD_USER_MAX];
+	int modern;                   /* only modern mode needs the chain scan */
+	unsigned long chain_sig;      /* arena + IVT the last scan saw */
+	long chained[MAX_OWNERS];     /* what it found */
+	size_t nchained;
 } dos_state;
 
 /* ---- real-mode memory ---------------------------------------------- */
@@ -248,6 +253,128 @@ static int in_device_chain(unsigned seg, unsigned size, farptr *prev_out, farptr
 	return 0;
 }
 
+/*
+ * Interrupt chains. A TSR that hooks a vector keeps the previous handler as
+ * a far pointer in its own memory and jumps there, so once a later TSR hooks
+ * the same vector the IVT only shows the newest one (on the Gateway 2000:
+ * UNIVBE, DOSKEY and MSCDEX sat behind CTMOUSE and SMARTDRV and looked
+ * free to kill). So: every block an interrupt vector points into is part of
+ * a chain; scan it for far pointers into other programs' blocks; those are
+ * in a chain too; repeat until nothing new turns up. Protecting too much is
+ * fine in modern mode; freeing a mid-chain hooker hangs the PC.
+ */
+/*
+ * The program whose resident code seg:off is a handler in, or -1. A saved
+ * handler is a CS:IP into that program's PSP block: CS is never below the
+ * PSP (a .COM runs at CS = PSP, an .EXE above it) and IP lands past the
+ * 256-byte PSP header. Anything else that happens to add up to an address
+ * in the block (other segment arithmetic, FCB pointers into the PSP) is
+ * not an interrupt chain.
+ */
+static long owner_at(const dos_state *s, unsigned seg, unsigned off)
+{
+	unsigned long lin = seg * 16ul + off;
+	size_t i;
+
+	for (i = 0; i < s->nblocks; i++) {
+		const mcb *m = &s->blocks[i];
+		unsigned psp = m->seg + 1;
+		unsigned long lo = psp * 16ul, hi = lo + m->size * 16ul;
+
+		if (lin < lo || lin >= hi)
+			continue;
+		if (m->owner != psp || seg < psp || lin < lo + 0x100)
+			return -1;
+		return (long)psp;
+	}
+	return -1;
+}
+
+static psd_proc *proc_of(dos_state *s, long pid)
+{
+	size_t i;
+
+	for (i = 0; i < s->nprocs; i++)
+		if (s->procs[i].pid == pid && !s->procs[i].is_daemon)
+			return &s->procs[i];
+	return NULL;
+}
+
+static void chain_guard(dos_state *s)
+{
+	static unsigned char buf[4096];
+	unsigned char scan[MAX_BLOCKS], done[MAX_BLOCKS];
+	unsigned lo_seg = 0xffff, hi_seg = 0;
+	size_t i, j;
+	int v, more = 1;
+
+	memset(scan, 0, sizeof scan);
+	memset(done, 0, sizeof done);
+	for (i = 0; i < s->nblocks; i++) {
+		const mcb *m = &s->blocks[i];
+		unsigned long lo = (m->seg + 1ul) * 16, hi = lo + m->size * 16ul;
+
+		if (getenv("PSD_CHAIN_DEBUG"))
+			for (v = 0; v < 256; v++)
+				if (vectors[v] >= lo && vectors[v] < hi)
+					printf("chain: INT %02Xh -> block %04X (owner %04X)\n", v, m->seg, m->owner);
+		if (m->owner != 0 && m->seg < lo_seg)
+			lo_seg = m->seg;
+		if (m->owner != 0 && m->seg + m->size + 1 > hi_seg)
+			hi_seg = m->seg + m->size + 1;
+		for (v = 0; v < 256 && m->owner != 0; v++)
+			if (vectors[v] >= lo && vectors[v] < hi)
+				scan[i] = 1;     /* the head of a chain (or DOS/a driver) */
+	}
+	while (more) {
+		more = 0;
+		for (i = 0; i < s->nblocks; i++) {
+			const mcb *m = &s->blocks[i];
+			unsigned long base = (m->seg + 1ul) * 16, len = m->size * 16ul, off;
+
+			if (!scan[i] || done[i])
+				continue;
+			done[i] = 1;
+			/* only programs' own memory: DOS's system blocks are full of
+			 * PSP segment words that pair up into false pointers, and our
+			 * own blocks hold DJGPP's transfer buffer (data, not chains) */
+			if (m->owner == 0 || m->owner == 8 || m->owner == s->self_psp)
+				continue;
+			if (m->owner == m->seg + 1)
+				off = 0x100;    /* skip the PSP header: parent links, not hooks */
+			else
+				off = 0;
+			for (; off < len; off += sizeof buf - 3) {
+				size_t n = len - off < sizeof buf ? len - off : sizeof buf, k;
+
+				peek((unsigned)((base + off) >> 4), (unsigned)((base + off) & 15), buf, n);
+				for (k = 0; k + 4 <= n; k++) {
+					unsigned seg = buf[k + 2] | (buf[k + 3] << 8);
+					long o;
+					psd_proc *p;
+
+					if (seg < lo_seg || seg >= hi_seg)
+						continue;   /* cheap: most bytes are not pointers */
+					o = owner_at(s, seg, buf[k] | (buf[k + 1] << 8));
+					if (o < 0 || o == (long)m->owner || (p = proc_of(s, o)) == NULL ||
+					    p->is_kernel)
+						continue;
+					p->is_kernel = 1;
+					if (getenv("PSD_CHAIN_DEBUG"))
+						printf("chain: block %04X (owner %04X) +%04lX -> %04X:%04X in %s\n",
+						       m->seg, m->owner, off + k, seg,
+						       buf[k] | (buf[k + 1] << 8), p->name);
+					for (j = 0; j < s->nblocks; j++)
+						if (s->blocks[j].owner == (unsigned)o && !done[j]) {
+							scan[j] = 1;
+							more = 1;
+						}
+				}
+			}
+		}
+	}
+}
+
 static int is_hidden(const dos_state *s, unsigned seg)
 {
 	size_t i;
@@ -366,6 +493,36 @@ static int dos_snapshot(psd_backend *b, psd_proc **out, size_t *n)
 		p->is_kernel = strcmp(p->name, "CWSDPMI") == 0 ||
 		               hooked(s, (unsigned)p->pid);
 	}
+	if (s->modern) {
+		/* the scan reads every hooked block: redo it only when the arena
+		 * or the vectors changed, else reapply what it found */
+		unsigned long sig = 2166136261ul;
+		int v;
+
+		for (i = 0; i < s->nblocks; i++)
+			sig = (sig ^ (s->blocks[i].seg ^ (s->blocks[i].owner << 7) ^
+			              ((unsigned long)s->blocks[i].size << 13))) * 16777619ul;
+		for (v = 0; v < 256; v++)
+			sig = (sig ^ vectors[v]) * 16777619ul;
+		if (sig != s->chain_sig) {
+			unsigned char before[MAX_OWNERS];
+
+			for (i = 0; i < s->nprocs; i++)
+				before[i] = (unsigned char)s->procs[i].is_kernel;
+			chain_guard(s);
+			s->nchained = 0;
+			for (i = 0; i < s->nprocs; i++)
+				if (s->procs[i].is_kernel && !before[i])
+					s->chained[s->nchained++] = s->procs[i].pid;
+			s->chain_sig = sig;
+		} else {
+			for (i = 0; i < s->nchained; i++) {
+				psd_proc *p = proc_of(s, s->chained[i]);
+				if (p)
+					p->is_kernel = 1;
+			}
+		}
+	}
 	*out = s->procs;
 	*n = s->nprocs;
 	return PSD_OK;
@@ -462,7 +619,6 @@ int psd_backend_native_open(psd_backend *b, const struct psd_config *cfg)
 	mcb probe;
 	unsigned lol_seg, lol_off;
 
-	(void)cfg;
 	if (list_of_lists(&lol_seg, &lol_off) != PSD_OK ||
 	    !read_mcb(peekw(lol_seg, lol_off - 2), &probe))
 		return PSD_ERR_BACKEND;  /* not a DOS we understand */
@@ -470,6 +626,7 @@ int psd_backend_native_open(psd_backend *b, const struct psd_config *cfg)
 	if (s == NULL)
 		return PSD_ERR;
 	s->self_psp = _go32_info_block.linear_address_of_original_psp >> 4;
+	s->modern = cfg->mode == PSD_MODE_MODERN;
 	me = psd_platform_whoami();
 	psd_strlcpy(s->user, me ? me : "dos", sizeof s->user);
 

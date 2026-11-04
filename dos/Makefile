@@ -54,7 +54,7 @@ $(BUILD_DIR)/psdps.exe: tools/psdps.c $(EXE)
 	$(CC) -O2 -march=i486 -Wall -I$(TOP)/libpsd/include $< $(OG_BUILD)/libpsd/libpsd.a -o $@
 
 # Test TSRs
-TSRS := $(BUILD_DIR)/tsr.com $(BUILD_DIR)/hooktsr.com
+TSRS := $(BUILD_DIR)/tsr.com $(BUILD_DIR)/hooktsr.com $(BUILD_DIR)/chaintsr.com
 tests: $(TSRS)
 $(BUILD_DIR)/%.com: tests/%.asm
 	@mkdir -p $(@D)
@@ -96,8 +96,9 @@ bundle: game tests $(CWSDPMI) $(NE2000)
 	cp $(BUILD_DIR)/psdps.exe $(BUNDLE)/PSDPS.EXE
 	cp $(BUILD_DIR)/tsr.com $(BUNDLE)/TSR.COM
 	cp $(BUILD_DIR)/hooktsr.com $(BUNDLE)/HOOKTSR.COM
+	cp $(BUILD_DIR)/chaintsr.com $(BUNDLE)/CHAINTSR.COM
 	cp $(CWSDPMI) $(BUNDLE)/CWSDPMI.EXE
 	cp $(NE2000) $(BUNDLE)/NE2000.COM
 	cp $(TOP)/data/psdoom1.wad $(BUNDLE)/PSDOOM1.WAD
 	cp $(TOP)/data/psdoom2.wad $(BUNDLE)/PSDOOM2.WAD
-	cp tests/MCBTEST.BAT tests/SMOKE.BAT tests/NETTEST.BAT $(BUNDLE)/
+	cp tests/MCBTEST.BAT tests/SMOKE.BAT tests/NETTEST.BAT tests/CHAINCHK.BAT $(BUNDLE)/

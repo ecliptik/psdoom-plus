@@ -19,7 +19,7 @@ build=$here/build
 iwad=${1:-/usr/share/games/doom/freedoom2.wad}
 out=${PSTEST_OUT:-$build/pstest}
 
-for f in "$build/psdoom.exe" "$build/psdps.exe" "$build/tsr.com" "$build/hooktsr.com" \
+for f in "$build/psdoom.exe" "$build/psdps.exe" "$build/tsr.com" "$build/hooktsr.com" "$build/chaintsr.com" \
          "$here/vendor/cwsdpmi/cwsdpmi.exe" "$iwad" "$top/data/psdoom2.wad"; do
 	[ -f "$f" ] || { echo "missing $f (make game tests cwsdpmi?)" >&2; exit 2; }
 done
@@ -30,6 +30,7 @@ cp "$build/psdoom.exe" "$work/PSDOOM.EXE"
 cp "$build/psdps.exe" "$work/PSDPS.EXE"
 cp "$build/tsr.com" "$work/TSR.COM"
 cp "$build/hooktsr.com" "$work/HOOKTSR.COM"
+cp "$build/chaintsr.com" "$work/CHAINTSR.COM"
 cp "$iwad" "$work/DOOM2.WAD"
 cp "$top/data/psdoom2.wad" "$work/PSDOOM2.WAD"
 
@@ -40,7 +41,7 @@ echo "== DOSBox-X: TSRs, classic then modern"
 CWSDPMI=$here/vendor/cwsdpmi/cwsdpmi.exe "$hub/dosbox-run.sh" --fast \
 	--exe "$work/TEST.BAT" --keep-stage --stage-file "$work/stage" \
 	--include "$work/PSDOOM.EXE" --include "$work/PSDPS.EXE" \
-	--include "$work/TSR.COM" --include "$work/HOOKTSR.COM" \
+	--include "$work/TSR.COM" --include "$work/HOOKTSR.COM" --include "$work/CHAINTSR.COM" \
 	--include "$work/DOOM2.WAD" --include "$work/PSDOOM2.WAD" --include "$work/MCBTEST.BAT" \
 	--stdout "$work/stdout.txt" >/dev/null 2>&1 || true
 stage=$(cat "$work/stage")
