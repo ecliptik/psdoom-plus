@@ -19,6 +19,9 @@ Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for
 cloud apps) can plug in through psdoom-ng's `PSDOOM_NG_*_CMD` hooks, so kubedoom-style helpers
 work unchanged.
 
+Releases: see [CHANGELOG.md](CHANGELOG.md). Releases are source; the MS-DOS build is also a ready
+zip (`psdoom-plus-<version>-dos.zip`, built by `make -C dos dist`; bring your own IWAD).
+
 > **Warning:** this program sends real signals to real processes. In `classic` mode
 > nothing is protected: it will happily kill your shell, your desktop or itself. Try it in a
 > throwaway VM first.
@@ -47,6 +50,7 @@ PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
 | Path | What |
 |---|---|
 | `PLAN.md` | design, decisions and phases |
+| `CHANGELOG.md` | what each release contains |
 | `libpsd/` | the process library every engine links: backends, kill modes, audit log ([API](libpsd/include/psd.h)) |
 | `data/` | the original psDooM custom levels `psdoom1.wad` (Doom) and `psdoom2.wad` (Doom II) |
 | `tools/psdev` | developer CLI: test VMs, `test unit [--vm <os>]` |

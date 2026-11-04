@@ -12,6 +12,7 @@
 #   make pktdrv     fetch Crynwr's NE2000 packet driver (tests only) into vendor/crynwr/
 #   make check      tests/dosbox-pstest.sh: TSRs shot in DOSBox-X
 #   make bundle     build/bundle/: what tools/psdev test dos ships to a guest
+#   make dist       build/psdoom-plus-$(VERSION)-dos.zip: the DOS release
 
 PORT_NAME := psdoom
 REPO_ROOT := $(abspath .)
@@ -27,7 +28,7 @@ EXE      := $(BUILD_DIR)/psdoom.exe
 # 486 baseline, Pentium scheduling; NOSIMD_FLAGS keeps SDL's SSE paths out.
 OG_CFLAGS := $(NOSIMD_FLAGS) -march=i486 -mtune=pentium
 
-.PHONY: all game og-src clean-game tests cwsdpmi pktdrv check bundle
+.PHONY: all game og-src clean-game tests cwsdpmi pktdrv check bundle dist
 all: game
 
 game: sdl3 $(EXE) $(BUILD_DIR)/psdps.exe
@@ -102,3 +103,23 @@ bundle: game tests $(CWSDPMI) $(NE2000)
 	cp $(TOP)/data/psdoom1.wad $(BUNDLE)/PSDOOM1.WAD
 	cp $(TOP)/data/psdoom2.wad $(BUNDLE)/PSDOOM2.WAD
 	cp tests/MCBTEST.BAT tests/SMOKE.BAT tests/NETTEST.BAT tests/CHAINCHK.BAT $(BUNDLE)/
+
+# The DOS release: the game, PSDPS, CWSDPMI with its own terms, psDooM's
+# levels, the licences (dos/LICENSE-REVIEW.md says what may ship; no IWAD)
+VERSION  := $(shell sed -n 's/^\#define PSD_VERSION *"\(.*\)"/\1/p' $(TOP)/libpsd/include/psd.h)
+DISTNAME := psdoom-plus-$(VERSION)-dos
+DISTDIR  := $(BUILD_DIR)/$(DISTNAME)
+dist: game $(CWSDPMI)
+	rm -rf $(DISTDIR) $(DISTDIR).zip
+	mkdir -p $(DISTDIR)
+	cp $(EXE) $(DISTDIR)/PSDOOM.EXE
+	cp $(BUILD_DIR)/psdps.exe $(DISTDIR)/PSDPS.EXE
+	cp $(CWSDPMI) $(DISTDIR)/CWSDPMI.EXE
+	cp $(VENDOR_DIR)/cwsdpmi/cwsdpmi.doc $(DISTDIR)/CWSDPMI.DOC
+	cp $(TOP)/data/psdoom1.wad $(DISTDIR)/PSDOOM1.WAD
+	cp $(TOP)/data/psdoom2.wad $(DISTDIR)/PSDOOM2.WAD
+	sed 's/@VERSION@/$(VERSION)/g' dist/README.TXT | sed 's/$$/\r/' > $(DISTDIR)/README.TXT
+	sed 's/$$/\r/' $(TOP)/LICENSE > $(DISTDIR)/COPYING.TXT
+	sed 's/$$/\r/' $(VENDOR_DIR)/SDL/LICENSE.txt > $(DISTDIR)/SDL.TXT
+	cd $(BUILD_DIR) && TZ=UTC zip -q -X -r $(DISTNAME).zip $(DISTNAME)
+	@echo "$(DISTDIR).zip"; cd $(BUILD_DIR) && sha256sum $(DISTNAME).zip
