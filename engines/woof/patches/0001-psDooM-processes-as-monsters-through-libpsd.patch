@@ -21,10 +21,10 @@ PS_Resync() re-adopts them after a load.
  src/p_mobj.h   |  7 +++++++
  src/p_setup.c  |  4 ++++
  src/p_tick.c   |  2 ++
- src/params.h   | 23 +++++++++++++++++++++++
+ src/params.h   | 24 ++++++++++++++++++++++++
  src/r_defs.h   |  5 +++++
  src/r_things.c | 16 ++++++++++++++++
- 14 files changed, 101 insertions(+), 3 deletions(-)
+ 14 files changed, 102 insertions(+), 3 deletions(-)
 
 diff --git a/src/d_main.c b/src/d_main.c
 index a7327bb..a9dae05 100644
@@ -334,7 +334,7 @@ index 36e481b..bde4509 100644
    }
  
 diff --git a/src/params.h b/src/params.h
-index 9e560da..72beb4a 100644
+index 9e560da..3eb3614 100644
 --- a/src/params.h
 +++ b/src/params.h
 @@ -1,5 +1,17 @@
@@ -355,7 +355,7 @@ index 9e560da..72beb4a 100644
  "-devparm",
  "-help",
  "-nomusic",
-@@ -59,6 +71,17 @@ static const char *params[] = {
+@@ -59,6 +71,18 @@ static const char *params[] = {
  };
  
  static const char *params_with_args[] = {
@@ -367,6 +367,7 @@ index 9e560da..72beb4a 100644
 +"-pslog",
 +"-psmax",
 +"-psmode",
++"-psnet",
 +"-psprotect",
 +"-pstest",
 +"-pstestshot",

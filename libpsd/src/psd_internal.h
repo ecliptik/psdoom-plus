@@ -40,6 +40,10 @@ struct psd_config {
 	int log_set;                 /* 0 = default path, 1 = log_path (empty = off) */
 	char log_path[PSD_PATH_MAX];
 
+	/* net backend: psdoomd's address and shared token */
+	char net_addr[128];          /* host:port */
+	char net_token[128];
+
 	/* engine-level */
 	int disabled;
 	int no_safety;
@@ -69,6 +73,7 @@ struct psd_backend {
 int psd_backend_native_open(psd_backend *b, const struct psd_config *cfg);
 int psd_backend_cmd_open(psd_backend *b, const struct psd_config *cfg);
 int psd_backend_mock_open(psd_backend *b, const struct psd_config *cfg);
+int psd_backend_net_open(psd_backend *b, const struct psd_config *cfg);
 
 /* psd_platform.c */
 long long   psd_platform_now_ms(void);

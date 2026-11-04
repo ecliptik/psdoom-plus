@@ -42,6 +42,17 @@ void psd_config_set_max_procs(psd_config *cfg, int n) { cfg->max_procs = n < 0 ?
 void psd_config_set_grace_ms(psd_config *cfg, int ms) { cfg->grace_ms = ms < 0 ? 0 : ms; }
 void psd_config_set_show_protected(psd_config *cfg, int on) { cfg->show_protected = on != 0; }
 
+void psd_config_set_net(psd_config *cfg, const char *hostport)
+{
+	psd_strlcpy(cfg->net_addr, hostport, sizeof cfg->net_addr);
+	cfg->backend = PSD_BACKEND_NET;
+}
+
+void psd_config_set_net_token(psd_config *cfg, const char *token)
+{
+	psd_strlcpy(cfg->net_token, token, sizeof cfg->net_token);
+}
+
 void psd_config_set_all_users(psd_config *cfg, int on)
 {
 	cfg->all_users = on != 0;
@@ -205,6 +216,14 @@ static int apply_key(psd_config *cfg, const char *key, const char *val)
 	}
 	if (strcmp(key, "log") == 0)
 		return psd_config_set_log(cfg, val);
+	if (strcmp(key, "net") == 0) {
+		psd_config_set_net(cfg, val);
+		return PSD_OK;
+	}
+	if (strcmp(key, "net_token") == 0) {
+		psd_config_set_net_token(cfg, val);
+		return PSD_OK;
+	}
 	return PSD_ERR;
 }
 
@@ -320,6 +339,9 @@ int psd_config_parse_args(psd_config *cfg, int argc, char **argv)
 		} else if (strcmp(a, "-psgrace") == 0 && next) {
 			if (parse_int(next, &cfg->grace_ms) != PSD_OK)
 				rc = PSD_ERR;
+			i++;
+		} else if (strcmp(a, "-psnet") == 0 && next) {
+			psd_config_set_net(cfg, next);
 			i++;
 		} else if (strcmp(a, "-psshowprotected") == 0) {
 			cfg->show_protected = 1;

@@ -37,6 +37,9 @@ build/og/psdoom-og -psclassic              # psDooM 2000: renice +5, kill -9, no
 tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-crispy
 tools/psdev build uzdoom                   # or gzdoom: build/uzdoom/psdoom-uzdoom (needs GL)
 tools/psdev build woof                     # or dsda: build/woof/psdoom-woof
+# another machine's processes: run psdoomd there, point any engine at it
+PSDOOMD_TOKEN=<secret> psdoomd -l 192.168.1.10:6666          # on the target (modern rules apply)
+PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
 ```
 
 ## Layout

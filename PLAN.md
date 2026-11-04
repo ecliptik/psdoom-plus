@@ -327,7 +327,18 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
      CWSDPMI, interrupt-hooked blocks and linked drivers, and DOS shows them as invulnerable.
      `dos/tests/dosbox-pstest.sh`: 10/10 (two TSRs and an INT 60h hooker, classic and modern,
      checked with `PSDPS.EXE`, the MCB chain as libpsd sees it). Not yet: device drivers under a
-     real CONFIG.SYS (DOSBox-X loads none), `net` + `psdoomd`, real hardware.
+     real CONFIG.SYS (DOSBox-X loads none), real hardware.
+   - ✅ **`psdoomd` + `net` backend on Linux/BSD/Haiku** (2026-11-04): `libpsd/psdoomd.c` serves a
+     host's processes (native backend, or `-psbackend cmd` in front of a helper) over a line
+     protocol (`HELLO 1 <token>`, `LIST`, `SIGNAL`, `RENICE`; see `libpsd/src/backend_net.c`);
+     explicit `-l ADDR:PORT`, a 12+ character token from `$PSDOOMD_TOKEN` or `-k FILE`, one client
+     at a time, refuses to relay. psdoomd's mode is the floor: a client playing classic cannot kill
+     what a modern psdoomd protects (refusals are audited on the host). Clients: `-psnet HOST:PORT`
+     + `$PSDOOM_NET_TOKEN` (or `net`/`net_token` in the config), in every engine. New public
+     `psd_renice()`. `tests/net/run.sh`: 12/12 plus og `-psnet -pstest` against a fake table.
+   - ⏸ **`net` on DOS**: needs a TCP/IP stack for DJGPP. Watt-32's licence (WATTCP terms in
+     `src/copyrigh.h`: no distribution of modified library versions without permission) is not
+     GPL-compatible, so linking it into PSDOOM.EXE is an owner decision (2026-11-04).
 8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
    per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random
    signatures, DSDA's `dboolean` and argv, its messenger) and hook scripts

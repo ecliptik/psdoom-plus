@@ -115,7 +115,7 @@ int  psd_config_load_default_file(psd_config *cfg);
 /*
  * Recognises psDooM's flags (-nopsmon -nopsact -nopssafety -nopslev -psallusers
  * -psuser [u...] -psnotuser [u...]) and psdoom-plus's (-psmode classic|modern,
- * -psclassic, -psbackend native|cmd|mock|net, -psmax N, -psgrace MS,
+ * -psclassic, -psbackend native|cmd|mock|net, -psnet HOST:PORT, -psmax N, -psgrace MS,
  * -psshowprotected, -psprotect GLOB, -pslog PATH|off, -psconf PATH).
  * Other arguments are ignored, so an engine can pass its whole argv.
  */
@@ -131,6 +131,10 @@ void psd_config_set_no_act(psd_config *cfg, int on);              /* -nopsact: l
 void psd_config_set_max_procs(psd_config *cfg, int n);            /* 0 = unlimited */
 void psd_config_set_grace_ms(psd_config *cfg, int ms);
 void psd_config_set_show_protected(psd_config *cfg, int on);
+/* net backend: psdoomd at host:port (also selects the backend), and its token
+ * ($PSDOOM_NET_TOKEN, if set, wins over the config file) */
+void psd_config_set_net(psd_config *cfg, const char *hostport);   /* -psnet */
+void psd_config_set_net_token(psd_config *cfg, const char *token);
 int  psd_config_set_log(psd_config *cfg, const char *path);       /* NULL or "off" disables */
 
 /* Engine-level flags libpsd parses for convenience but does not act on. */
@@ -156,6 +160,8 @@ int psd_wound(psd_ctx *ctx, long pid, int health, int spawnhealth);
 int psd_kill(psd_ctx *ctx, long pid);
 /* Send one specific signal (weapon -> signal mapping, later phases). */
 int psd_send(psd_ctx *ctx, long pid, psd_signal sig);
+/* Set a priority directly (psdoomd); refused for protected ones in modern mode. */
+int psd_renice(psd_ctx *ctx, long pid, int nice);
 
 /* Forget every tracked monster without events (the engine changed level). */
 void psd_reset(psd_ctx *ctx);

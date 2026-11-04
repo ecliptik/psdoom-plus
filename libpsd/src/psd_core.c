@@ -344,6 +344,10 @@ psd_ctx *psd_open(const psd_config *cfg, int *err)
 		}
 	}
 
+	/* psdoomd already chose the users on its side; our name means nothing there */
+	if (ctx->cfg.backend == PSD_BACKEND_NET && !cfg->userlist_given)
+		ctx->cfg.all_users = 1;
+
 	if (ctx->cfg.mode == PSD_MODE_CLASSIC) {
 		ctx->max_procs = cfg->max_procs >= 0 ? cfg->max_procs : 0;
 		ctx->grace_ms = 0;
@@ -358,6 +362,9 @@ psd_ctx *psd_open(const psd_config *cfg, int *err)
 	case PSD_BACKEND_CMD:    rc = psd_backend_cmd_open(&ctx->be, &ctx->cfg); break;
 #endif
 	case PSD_BACKEND_MOCK:   rc = psd_backend_mock_open(&ctx->be, &ctx->cfg); break;
+#ifndef PSD_NO_NET
+	case PSD_BACKEND_NET:    rc = psd_backend_net_open(&ctx->be, &ctx->cfg); break;
+#endif
 	default:                 rc = PSD_ERR_BACKEND; break;
 	}
 	if (rc != PSD_OK) {
@@ -570,10 +577,37 @@ int psd_send(psd_ctx *ctx, long pid, psd_signal sig)
 	if (t == NULL)
 		return PSD_ERR_UNKNOWN;
 	if (t->p.is_protected && ctx->cfg.mode == PSD_MODE_MODERN) {
-		audit(ctx, "signal", &t->p, NULL, "protected");
+		char detail[32];
+
+		snprintf(detail, sizeof detail, "sig=%s", psd_signal_name(sig));
+		audit(ctx, "signal", &t->p, detail, "protected");
 		return PSD_ERR_PROTECTED;
 	}
 	return deliver(ctx, t, sig, "signal");
+}
+
+int psd_renice(psd_ctx *ctx, long pid, int nice)
+{
+	track *t = find_track(ctx, pid);
+	char detail[32];
+	int rc;
+
+	if (t == NULL)
+		return PSD_ERR_UNKNOWN;
+	if (t->p.is_protected && ctx->cfg.mode == PSD_MODE_MODERN) {
+		audit(ctx, "renice", &t->p, NULL, "protected");
+		return PSD_ERR_PROTECTED;
+	}
+	if (nice < -20 || nice > 19)
+		return PSD_ERR;
+	snprintf(detail, sizeof detail, "nice=%d", nice);
+	if (ctx->cfg.no_act) {
+		audit(ctx, "renice", &t->p, detail, "dry-run");
+		return PSD_OK;
+	}
+	rc = ctx->be.set_nice(&ctx->be, &t->p, nice);
+	audit(ctx, "renice", &t->p, detail, result_str(rc));
+	return rc;
 }
 
 int psd_wound(psd_ctx *ctx, long pid, int health, int spawnhealth)
