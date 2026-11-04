@@ -1,0 +1,122 @@
+From cdd8c9690f8450a1c25b2b2b9cf2a0f48cf1f324 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 23 Sep 2026 00:06:20 -0700
+Subject: [PATCH 2/3] [SDL3-DOS] dos: patch 0142 -- GetDeviceBuf abandons the
+ iteration when the SB ring has no room for a chunk
+
+WHY DOS NEEDS THIS: DOSSOUNDBLASTER_PlayDevice copies a chunk into the
+ISR ring with no room check of its own (patch 0141 counts the result),
+and two writers reach it:
+  - SDL_DOSAudioPump() (patch 0067) calls SDL_PlaybackAudioThreadIterate()
+    directly, with no WaitDevice at all, and looks at room only
+    afterwards, for its return value.
+  - The background thread's while (Iterate()) WaitDevice() loop does check
+    room, but in WaitDevice, which runs WITHOUT device->lock and, on the
+    room-available path, calls DOS_Yield() (patch 0086, on by default)
+    before returning. The main thread can pump into that last free chunk
+    during the yield, and the thread's Iterate then writes into a full
+    ring.
+Either way the write lands on the chunk the IRQ handler plays next.
+
+Evidence (dosags, PLAN.md step 8, 2026-09-22; all DOSBox-X, none yet on
+real hardware):
+  - SB live (no -silent, SB detection on), 5 Days a Stranger in play, OPL3
+    music + SB PCM SFX, counter from 0141: before, overwrites=38 and 19,
+    peak fill 1625 and 1578 ms against a 743 ms ring (cells OVW1, OVW3).
+  - A first version put the room check at the top of SDL_DOSAudioPump.
+    It gave overwrites=0 on 5 Days (OVW2, OVW4), but AGS Quest (music is
+    SB PCM) still showed overwrites=1, peak 789/743 = capacity plus one
+    46 ms chunk, in every run -- the WaitDevice-yield path above. Those
+    AGS Quest runs came from the screen-equality gate; the same gate,
+    before any guard, read 1237-3350 overwrites per run and peak fill
+    50-148 s. (Corrected 2026-09-23: this message first said the gate
+    ran with DOSBox-X's SB switched off. It did not -- its freeze-capture
+    runs are interactive, never -silent, and their manifests show
+    pcm_irqs 193-249, so the SB was playing, with detection skipped.
+    The fill sizes are real mixer-speed overrun of a draining ring.)
+    The single residual write past a full ring is what located the
+    second path.
+    The check has to sit where both writers pass under the lock.
+  - This version (cells SBL1-SBL4, SB live): overwrites=0 and
+    ring_max_ms <= 743 in every run, including AGS Quest SB PCM music
+    (SBL4, 743/743); the ring fills to exactly capacity and waits there.
+    SFX are not silenced: sound 10 gives pcm_irqs=227 on this build (SBL1,
+    SBL3), identical to the pump-side version (OVW4).
+Hardware confirmation pending.
+
+WHAT: at the top of DOSSOUNDBLASTER_GetDeviceBuf -- called by
+SDL_PlaybackAudioThreadIterate with device->lock held, before the stream
+pull and before PlayDevice -- if ring_size - (ring_write - isr_ring_read)
+< chunk_size, set *buffer_size = 0 and return. SDL's core treats
+buffer_size == 0 as "abandon this iteration, try again next time"
+(SDL_audio.c, the WASAPI convention): no stream pull, no PlayDevice. The
+mixed data stays in the bound stream until the ISR frees a chunk.
+SDL_DOSAudioPump's own post-iterate room test is unchanged, so it still
+returns false on a full ring and a caller's pump loop still exits.
+
+This is NOT the SDL/0050 gate that 0054 (Shape A) removed from this same
+function (see the comment above the new block). 0050 returned
+buffer_size = 0 when no bound stream had data, which is exactly the
+moment a pull is needed to make SDL3_mixer's MixerCallback produce SFX,
+so SFX went silent for the whole session. This gate never looks at the
+streams. It holds only while the ring is full -- at least
+ring_size - chunk_size of audio already queued for the ISR -- and
+releases as soon as the ISR drains one chunk (~46 ms at 11025 Hz). With
+room, behaviour is unchanged.
+
+Side effect worth knowing: a port that pumped into a full ring used to
+see its PCM "finish" at mix speed; now playback is paced by the device,
+so a script step that waits on a sound ends on wall-clock time. dosags
+saw exactly that make a tick-for-tick A/B screen gate row
+non-deterministic under DOSBox-X, and moved that row to sound-off.
+
+Source: dosags patches/SDL/0191 (From b20db8f346f4), re-derived here
+against the hub series (line offset only; no dosags-only patch touches
+GetDeviceBuf, PlayDevice, WaitDevice or SDL_DOSAudioPump). Comment tags
+renumbered 0191 -> 0142.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ src/audio/dos/SDL_dosaudio_sb.c | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index a2e06d64f..9309470ee 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -3564,7 +3564,30 @@ static Uint8 *DOSSOUNDBLASTER_GetDeviceBuf(SDL_AudioDevice *device, int *buffer_
+        in tree for documentation per `pressure_test_tidy_narratives.md`
+        -- fixing-the-wrong-layer is a useful negative-result reference),
+        SDL/0053 (BeginShutdown semantic preserved). */
+-    (void)buffer_size; /* unchanged; ring writes happen in PlayDevice */
++    (void)buffer_size; /* unchanged unless the ring is full (0142, below) */
++
++    /* DOS-PORT patch 0142: no room in the ISR ring for one chunk -> abandon
++       this iteration before the mix pull (SDL_audio.c: buffer_size == 0 means
++       "try again next time"; the core skips the stream pull AND PlayDevice).
++       PlayDevice has no room check of its own, and this is the one point
++       both writers pass under device->lock: the background thread's Iterate
++       (whose WaitDevice room check runs unlocked and then yields) and
++       SDL_DOSAudioPump's Iterate (which has no WaitDevice at all). The mixed
++       data stays in the bound stream until the ISR frees a chunk.
++       NOT the SDL/0050 gate that Shape A removed (comment above): that one
++       gated on "no bound stream has data", which is exactly when a pull is
++       needed to make the mixer callback produce SFX, so SFX went silent.
++       This gates only on "the ring is full" -- there is always at least
++       ring_size - chunk_size of audio queued for the ISR -- and it releases
++       as soon as the ISR drains one chunk (~46 ms at 11025 Hz). The stream
++       being empty never holds it. */
++    {
++        struct SDL_PrivateAudioData *hidden = device->hidden;
++        if ((hidden->ring_size - (hidden->ring_write - isr_ring_read)) < hidden->chunk_size) {
++            *buffer_size = 0;
++            return hidden->staging_buffer;
++        }
++    }
+ 
+     /* DOSKUTSU patch (Phase 11 patch 0064, SFX-stall instrumentation
+        part C): open the per-invocation SDL-DOS audio-callback timing
+-- 
+2.47.3
+

@@ -1,0 +1,81 @@
+From 45e93d735f47d04114faa191ac3983f2780fcdf7 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 20:12:56 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0130 -- diagnostic lever to force INT
+ 10h bank-switch
+
+SwitchBank() uses a BIOS-provided WinFuncPtr fast far-call routine
+(__dpmi_simulate_real_mode_procedure_retf) instead of plain INT 10h
+AX=4F05 whenever the VBE mode info reports one nonzero. A buggy
+WinFuncPtr implementation for specific bank ranges/offsets on a specific
+BIOS/chip revision is a known class of real VESA hardware defect (part
+of why UniVBE-style TSRs existed in the first place) -- this adds
+SDL_HINT_DOS_FORCE_INT10_BANKSWITCH="1" to ignore whatever WinFuncPtr
+the BIOS reported and always use the plain INT 10h path, testing that
+theory directly rather than guessing from behavior alone. Off by
+default, one cached-int check per SwitchBank call when unset.
+
+Motivated by a real-hardware Mach64 investigation (dossage/Passage):
+SDL/0129's readback probe found a deterministic, 100%-reproducible write
+failure at one specific physical VRAM offset, ruling out tearing/vsync
+timing as the cause (confirmed a genuine write failure, not a probe
+artifact, via a DOSBox-X cross-check of the exact same probe/build).
+This card's existing SDL_HINT_DOS_ORGCACHE_PRESENT_PROBE diagnostic
+already logs which bank-switch mechanism is in use
+("via=rmproc-farcall"/"via=int10-4F05") with no new code needed -- worth
+checking that first on the next real-hardware round; this lever is
+ready in the same build regardless, so confirming which path is active
+and testing the fix don't need two separate rig round-trips.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index 7bb061791..df4907fd0 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1032,11 +1032,39 @@ bool DOSVESA_GetWindowFramebufferVSync(SDL_VideoDevice *device, SDL_Window *wind
+ 
+ // Switch the VGA bank window if needed. Returns without doing anything
+ // if the requested bank is already active.
++// SDL/0130: diagnostic override -- force INT 10h AX=4F05 bank-switch even
++// when the BIOS provided a WinFuncPtr fast far-call routine. Gated behind
++// SDL_HINT_DOS_FORCE_INT10_BANKSWITCH="1", off by default (one cached-int
++// check per SwitchBank call when unset). A buggy WinFuncPtr implementation
++// for specific bank ranges/offsets on a specific BIOS/chip revision is a
++// known class of real VESA hardware defect (part of why UniVBE-style TSRs
++// existed in the first place); this lever routes around the fast far-call
++// path entirely to test whether it's the actual cause of a bank-switch-
++// dependent write failure, without needing to guess from behavior alone.
++static int g_force_int10_bankswitch = -1; /* -1 = unresolved */
++
++static int dos_force_int10_bankswitch_active(void)
++{
++    if (g_force_int10_bankswitch < 0) {
++        const char *h = SDL_GetHint("SDL_HINT_DOS_FORCE_INT10_BANKSWITCH");
++        g_force_int10_bankswitch = (h && h[0] == '1' && h[1] == 0) ? 1 : 0;
++        dos_port_dbg_log(
++            "sdl: SDL/0130 FORCE-INT10-BANKSWITCH %s (ignores any BIOS-"
++            "provided WinFuncPtr fast far-call and always uses INT 10h "
++            "AX=4F05 for bank switches when set)",
++            g_force_int10_bankswitch ? "ENABLED" : "disabled (default)");
++    }
++    return g_force_int10_bankswitch;
++}
++
+ SDL_FORCE_INLINE void SwitchBank(int bank, int *current_bank, Uint32 win_func_ptr)
+ {
+     if (bank == *current_bank) {
+         return;
+     }
++    if (dos_force_int10_bankswitch_active()) {
++        win_func_ptr = 0;
++    }
+     __dpmi_regs regs;
+     SDL_zero(regs);
+     regs.x.bx = 0; // Window A
+-- 
+2.47.3
+

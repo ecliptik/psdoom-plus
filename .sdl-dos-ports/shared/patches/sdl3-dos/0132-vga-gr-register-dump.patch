@@ -1,0 +1,92 @@
+From 41322ea269bc3be22b4df725425ce0a8cf61ed19 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 21:16:39 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0132 -- one-time legacy VGA GR register
+ dump
+
+Piggybacked on SDL_HINT_DOS_BANK_CHUNK_PROBE's existing activation (no
+new hint) -- a one-time, read-only dump of the standard VGA Graphics
+Controller registers GR04 (Read Map Select), GR05 (Mode Register --
+decoded into Read Mode / Write Mode), GR06 (Miscellaneous), and GR08
+(Bit Mask), via the standard 0x3CE index / 0x3CF data port pair present
+on every VGA-compatible chip, including SVGA/truecolor cards that retain
+full legacy compatibility underneath their extended modes.
+
+Motivated by a real-hardware Mach64 investigation (dossage/Passage):
+SDL/0129-0131 found a write-failure signature (always-zero readback)
+that's 100% uniform across every bank/offset tested and has zero timing
+dependence -- a pattern that, taken at face value as a real write
+failure, contradicts the ~80%-correct rendering actually observed on
+the same hardware. A measurement problem in dosmemget()'s own read path
+fits "100%-everywhere-always" far better than a real write defect would.
+Concrete candidate: GR05's Read Mode bit left in legacy "Read Mode 1"
+(color-compare) from an incomplete BIOS mode-set sequence, which can
+make a raw CPU read through the aperture return something other than
+the literal stored byte, while a write in truecolor linear/banked mode
+typically bypasses this legacy latch path entirely -- meaning
+SDL/0128-0131's entire readback-based investigation may have been
+faithfully measuring something real but irrelevant to what a write-only
+renderer (never itself reading VRAM back) actually displays.
+
+Verified the port-access pattern precedent (this file already pokes
+0x3CE/0x3CF unconditionally for Cirrus chip detection elsewhere -- these
+reads are chip-agnostic and read-only, unlike that code) and the
+Read Mode/Write Mode bitfield decoding in an isolated test before
+generating the patch. Full patch-series replay from a clean reset
+confirms it applies cleanly.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 36 ++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index f7440f435..c391a2585 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1230,6 +1230,42 @@ static void dos_bank_chunk_probe_resolve(void)
+                      (unsigned long)g_bank_chunk_probe_len,
+                      DOS_BANK_CHUNK_PROBE_MAX_BYTES,
+                      g_bank_chunk_probe_emits_left);
++
++    // SDL/0132: one-time legacy VGA Graphics Controller register dump,
++    // piggybacked on this same probe activation (no separate hint --
++    // whoever's arming SDL_HINT_DOS_BANK_CHUNK_PROBE to chase a readback
++    // question wants this too). Ports 0x3CE (index) / 0x3CF (data) are
++    // the standard VGA Graphics Controller register pair, present on
++    // every VGA-compatible chip including SVGA/truecolor cards that
++    // retain full legacy compatibility underneath their extended modes
++    // (this backend already pokes the same port pair for Cirrus-specific
++    // detection elsewhere in this file -- these reads are unconditional
++    // and chip-agnostic, unlike that code). GR04 (Read Map Select) and
++    // GR05 (Mode Register -- bit 3 selects Read Mode 1, "color compare",
++    // a legacy planar-mode read path) being left in a non-default state
++    // by an incomplete BIOS mode-set could make a raw CPU read through
++    // the aperture return something other than the literal stored byte,
++    // while a write in a truecolor linear/banked mode typically bypasses
++    // this legacy latch path entirely -- which would mean SDL/0128-0131's
++    // dosmemget()-based readback has been measuring something real but
++    // irrelevant to what a write-only renderer actually displays. GR06
++    // (Miscellaneous) and GR08 (Bit Mask) included for the same reason;
++    // this is a read-only dump, no register state is modified.
++    {
++        Uint8 gr[4];
++        static const Uint8 gr_index[4] = {0x04, 0x05, 0x06, 0x08};
++        int gi;
++        for (gi = 0; gi < 4; gi++) {
++            outportb(0x3CE, gr_index[gi]);
++            gr[gi] = inportb(0x3CF);
++        }
++        dos_port_dbg_log(
++            "sdl: SDL/0132 VGA-GR-DUMP (read-only, ports 0x3CE/0x3CF) "
++            "GR04(ReadMapSelect)=0x%02x GR05(Mode)=0x%02x "
++            "(ReadMode=%d WriteMode=%d) GR06(Misc)=0x%02x "
++            "GR08(BitMask)=0x%02x",
++            gr[0], gr[1], (gr[1] >> 3) & 1, gr[1] & 3, gr[2], gr[3]);
++    }
+ }
+ 
+ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+-- 
+2.47.3
+

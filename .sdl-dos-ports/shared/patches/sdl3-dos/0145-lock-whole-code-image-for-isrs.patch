@@ -1,0 +1,246 @@
+From 029ebcaa451ec6bb4517a708ae80ba5945a15249 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 23 Sep 2026 08:28:32 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0145 -- lock the whole code image for
+ ISRs; DOS_LockCode no longer trusts function layout
+
+WHY DOS NEEDS THIS: every DOS_LockCode(fn, fn_End) in this series
+assumes the compiler lays functions out in source order, with an empty
+fn_End() right after fn(). DJGPP gcc 12 at -O2 does not: it emits
+functions in its own call-graph order. Measured in this series' own
+objects:
+  - Hub 0143 build, SDL_dosaudio_sb.c.obj (one .text section):
+      RingCopyOut 0xd80, RingCopyOut_End 0x0 (length -3456)
+      SoundBlasterIRQHandler 0x6140, its _End 0x6110 (length -48)
+      ISR_GetDMAHalf 0xe00, _End 0x6120 (+21280, spanning unrelated code)
+      SfxSynthISRMix 0x10, _End 0x6130 (+24864, same)
+  - With 0144 on top, 0144's MidiDeferWriteOne -> MidiDeferDrain_End
+    range is positive, but MidiDeferDrain itself is inlined into
+    SoundBlasterIRQHandler, outside that range.
+  - SDL_dos_audio_synth.c (OPL-PIT and PC-speaker ISRs) and
+    SDL_dosevents.c (keyboard ISR) happen to come out in source order, so
+    their ranges are positive.
+So the SB IRQ handler -- the ISR every SB port runs -- was never locked.
+Nothing noticed, for two reasons:
+  - CWSDPMI accepts the wrapped length: a scratch probe calling
+    _go32_dpmi_lock_code(fn, (unsigned long)-48) under CWSDPMI r7 in
+    DOSBox-X gets rc=0. What, if anything, that call locks is not visible
+    from the return code.
+  - Even a correct per-function range cannot cover what the handlers call
+    outside their own object. The 0143 SB handler (RingCopyOut inlined)
+    calls libc memcpy, libgcc __udivdi3, SfxSynthISRMix, and the port's
+    SDL/0072 MIDI tick callback through a function pointer. None of these
+    was in any locked range, whatever the layout.
+
+Remedies considered:
+  - A dedicated ISR text section with locked bounds. DJGPP's default
+    linker script (ld --verbose) folds *(.text.*) into .text with no SORT
+    and no __start_/__stop_ symbols, so the bounds would need a custom
+    linker script in every port. It also still would not cover libc,
+    libgcc or port callbacks.
+  - -fno-toplevel-reorder / -fno-reorder-functions on the ISR files. This
+    keeps depending on compiler layout (now through flags every port's
+    SDL build would have to carry), and still would not cover callees in
+    other objects.
+  - Min/max over the known symbols. That gives no end for a function body
+    at all, and has the same callee gap.
+  - Chosen: lock the program's whole code image once, [start, etext),
+    before the first handler is installed.
+      - `start` is crt0's entry symbol, the linker script's ENTRY.
+      - `etext` is PROVIDEd by the linker script at the end of .text,
+        which also holds .text.unlikely, .rodata and the rest of the
+        linker's .text input.
+    Both come from the link, not from the compiler's function order. It
+    covers every ISR, everything it calls (libc, libgcc, SDL, port
+    callbacks) and any cold split, in any layout.
+Cost: the code image can no longer be swapped out; CWSDPMI loads the
+image whole at startup anyway. It is about 1.5 MB for a small SDL
+program; the line below logs the exact size.
+
+WHAT:
+  - DOS_LockProgramText() (SDL_dos.c) locks [start, etext) once and logs
+    "DOS: patch 0145 program code lock [start=..., etext=...) = N bytes:
+    locked|FAILED". DOS_HookInterrupt() and DOS_HookInterruptReplace() --
+    the only two ways any ISR in this series is installed -- call it
+    first.
+  - DOS_LockCode() keeps its name and call sites, and now goes through
+    DOS_LockCodeRange(). A positive range is locked exactly as before. A
+    range with length <= 0 is not passed to the DPMI host; it is logged
+    once per call site as the permanent witness:
+      "DOS: patch 0145 DOS_LockCode(<fn>) range length <n> <= 0 (end
+      marker laid out before the function); not locked by range, covered
+      by the program code lock (held|NOT held)"
+  - Data locks (DOS_LockData / DOS_LockVariable) are unchanged.
+
+Scope, honestly: never observed failing. The failure mode being closed
+is a page fault inside an ISR, which needs CWSDPMI to actually page. It
+does that only when physical memory runs out and a swap file is
+available; its own documentation lists "an illegal page fault happens in
+a RMCB or HW interrupt (lock all pages!)" as a cause of its "Page fault"
+abort.
+
+Validation (DJGPP gcc 12.2.0, this series 0001-0145, DOSBox-X only):
+  - Built objects: the per-function ranges come out as before
+    (SoundBlasterIRQHandler -64, RingCopyOut -3504; the rest positive;
+    this patch does not change layout). In a linked probe, [start=0x19f0,
+    etext=0x1707e8) contains every ISR entry point in the series
+    (SoundBlasterIRQHandler, SfxSynthISRMix, RingCopyOut, ISR_GetDMAHalf,
+    MidiDeferWriteOne, OplPitISR, OplPitBeepISR, OplPitChainOld,
+    BeepStartNote, KeyboardIRQHandler) and each callee checked: memcpy,
+    __udivdi3, __divdi3, the port's tick callback, SDL_DOSOpl3WriteRegister,
+    SDL_DOSMpu401WriteByte, SDL_DOSMidiDeferCapture. No ISR has a .cold
+    split in that build.
+  - Runtime, dosbox-run.sh --sb-live, all three hook paths:
+      keyboard at video init: the code lock is logged first, "locked",
+        about 1.5 MB;
+      SB: the witness logs exactly the two negative ranges, then audio
+        plays as on 0143 -- the SBRING PCM probe gives 43/43 and 32/32
+        chunk accounting and 0 overwrites under a 392400-call pump storm;
+        the 0144 MIDI probe gives 172/172 deferred writes on time;
+      OPL-PIT: the pump starts, 100 ISR ticks in 1 s, BIOS chains 18/18.
+  - Hardware not run.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ src/core/dos/SDL_dos.c | 75 ++++++++++++++++++++++++++++++++++++++++++
+ src/core/dos/SDL_dos.h | 17 ++++++++--
+ 2 files changed, 90 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/dos/SDL_dos.c b/src/core/dos/SDL_dos.c
+index 5bfabcfeb..0e958fa8d 100644
+--- a/src/core/dos/SDL_dos.c
++++ b/src/core/dos/SDL_dos.c
+@@ -87,11 +87,85 @@ char *DOS_GetFarPtrCString(const Uint32 segoffset)
+     return retval;
+ }
+ 
++/* DOS-PORT patch 0145: keep ISR code resident without trusting function
++   layout.
++
++   Every DOS_LockCode(fn, fn_End) in this series assumed the compiler lays
++   functions out in source order. DJGPP gcc 12 at -O2 does not: in
++   SDL_dosaudio_sb.c the end markers of the SB IRQ handler and RingCopyOut
++   land BEFORE their functions, so those ranges had negative lengths (the
++   file's other two pairs span unrelated code instead). CWSDPMI
++   accepts the wrapped length with rc=0, so nothing ever reported it. And
++   even a correct range cannot cover what the handlers call outside their
++   own object -- libc memcpy, libgcc __udivdi3, the port's SDL/0072 MIDI
++   tick callback through a function pointer.
++
++   So: lock the program's whole code image once, [start, etext) -- crt0's
++   entry symbol (the linker script's ENTRY) to the linker-provided end of
++   .text, which also covers .rodata -- before the first handler is
++   installed. Those bounds come from the link, not from the compiler's
++   function order. The cost is that the code image can never be swapped
++   out; CWSDPMI only pages when physical memory runs out, and the image is
++   loaded whole at startup anyway. Data locks (DOS_LockData /
++   DOS_LockVariable) are unaffected: variables are not reordered relative
++   to their own sizes.
++
++   Failure mode being closed: a page fault inside an ISR, which only
++   happens if CWSDPMI actually pages (its own docs: "an illegal page fault
++   happens in a RMCB or HW interrupt (lock all pages!)"). Never observed
++   failing in this series. */
++extern void dos_port_dbg_log(const char *fmt, ...);
++extern char dos_port_text_start[] __asm__("start");
++extern char etext[];
++
++bool DOS_LockProgramText(void)
++{
++    static bool done = false;
++    static bool ok = false;
++    if (done) {
++        return ok;
++    }
++    done = true;
++    const unsigned long len = (unsigned long)(etext - dos_port_text_start);
++    const int rc = ((unsigned long)etext > (unsigned long)dos_port_text_start) ? _go32_dpmi_lock_code(dos_port_text_start, len) : -1;
++    ok = (rc == 0);
++    dos_port_dbg_log("DOS: patch 0145 program code lock [start=0x%lx, etext=0x%lx) = %lu bytes: %s",
++                     (unsigned long)dos_port_text_start, (unsigned long)etext, len,
++                     ok ? "locked" : "FAILED (ISR code is pageable)");
++    return ok;
++}
++
++/* The runtime witness for the layout problem: any DOS_LockCode range whose
++   end marker sits at or before its start is logged once per call site and
++   not passed to the DPMI host. Positive ranges behave exactly as before. */
++int DOS_LockCodeRange(void *start, void *end, const char *what)
++{
++    static const char *reported[32];
++    static int nreported = 0;
++    const long len = (long)((char *)end - (char *)start);
++    if (len > 0) {
++        return _go32_dpmi_lock_code(start, (unsigned long)len);
++    }
++    for (int i = 0; i < nreported; i++) {
++        if (reported[i] == what) {
++            return -1;
++        }
++    }
++    if (nreported < (int)SDL_arraysize(reported)) {
++        reported[nreported++] = what;
++    }
++    dos_port_dbg_log("DOS: patch 0145 DOS_LockCode(%s) range length %ld <= 0 (end marker laid out before "
++                     "the function); not locked by range, covered by the program code lock (%s)",
++                     what, len, DOS_LockProgramText() ? "held" : "NOT held");
++    return -1;
++}
++
+ void DOS_HookInterrupt(int irq, DOS_InterruptHookFn fn, DOS_InterruptHook *hook)
+ {
+     SDL_assert(irq >= 0 && irq <= 15);
+     SDL_assert(fn != NULL);
+     SDL_assert(hook != NULL);
++    (void)DOS_LockProgramText(); // DOS-PORT patch 0145: before any handler can run
+     hook->fn = fn;
+     hook->irq = irq;
+     hook->interrupt_vector = DOS_IRQToVector(irq);
+@@ -151,6 +225,7 @@ void DOS_HookInterruptReplace(int irq, DOS_InterruptHookFn fn, DOS_InterruptHook
+     SDL_assert(irq >= 0 && irq <= 15);
+     SDL_assert(fn != NULL);
+     SDL_assert(hook != NULL);
++    (void)DOS_LockProgramText(); // DOS-PORT patch 0145: before any handler can run
+     hook->fn = fn;
+     hook->irq = irq;
+     hook->interrupt_vector = DOS_IRQToVector(irq);
+diff --git a/src/core/dos/SDL_dos.h b/src/core/dos/SDL_dos.h
+index 457cffe2d..39b8962e4 100644
+--- a/src/core/dos/SDL_dos.h
++++ b/src/core/dos/SDL_dos.h
+@@ -49,9 +49,18 @@
+ 
+ // Lock a range of code so it won't be paged out during interrupts.
+ // Usage: DOS_LockCode(function_name, function_end_label)
+-// The function_end_label must be defined immediately after the function.
++// The function_end_label is defined immediately after the function in the
++// SOURCE, but gcc -O2 does not keep source order: it emits functions in its
++// own call-graph order, and the end marker can land before the function
++// (the SB IRQ handler and RingCopyOut in SDL_dosaudio_sb.c under DJGPP
++// gcc 12; the file's other pairs span unrelated code instead). A
++// range like that is never passed to the DPMI host (a wrapped length is
++// accepted with rc=0 by CWSDPMI, so the failure was silent); it is logged
++// once instead. What keeps ISR code resident is DOS_LockProgramText(),
++// which DOS_HookInterrupt*() run before any handler is installed. See
++// patch 0145.
+ #define DOS_LockCode(start, end) \
+-    _go32_dpmi_lock_code((void *)(start), (char *)(end) - (char *)(start))
++    DOS_LockCodeRange((void *)(start), (void *)(end), #start)
+ 
+ // Lock a range of data so it won't be paged out during interrupts.
+ #define DOS_LockData(var, size) \
+@@ -154,6 +163,10 @@ typedef struct DOS_InterruptHook
+     bool replaced;
+ } DOS_InterruptHook;
+ 
++/* DOS-PORT patch 0145: see DOS_LockCode above. */
++int DOS_LockCodeRange(void *start, void *end, const char *what);
++bool DOS_LockProgramText(void);
++
+ void DOS_HookInterrupt(int irq, DOS_InterruptHookFn fn, DOS_InterruptHook *hook); // `irq` is the IRQ number, not the interrupt vector number!
+ 
+ /* DOSKUTSU patch (Phase 11): variant of DOS_HookInterrupt that REPLACES
+-- 
+2.47.3
+

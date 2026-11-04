@@ -1,0 +1,93 @@
+From 97202d54833a62235045413407bd9d628186aa75 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 21:20:06 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0133 -- one-time CRTC offset register
+ dump
+
+Piggybacked on SDL_HINT_DOS_BANK_CHUNK_PROBE's existing activation (no
+new hint) -- a one-time, read-only read of the standard VGA CRTC Offset
+Register (index 0x13, via 0x3D4/0x3D5), logged alongside fb_state's own
+vram_pitch (BIOS-declared BytesPerScanLine).
+
+Confirmed by reading SDL_dosmodes.c directly: this backend's mode-set
+path never calls VBE function 4F06 (Set/Get Logical Scan Line Length)
+and never reads this register back -- BytesPerScanLine/vram_pitch is
+trusted from VBE GetModeInfo with zero independent verification against
+the actual hardware register that governs display scanout stride.
+
+Motivated by a real-hardware Mach64 investigation (dossage/Passage):
+a careful pixel-diff characterization (not a glance) of the corrupted
+region found distinct vertical color bands with sharp edges and
+structured-but-misplaced content -- the classic visual signature of a
+scanout stride mismatch, not noise or a stale frame (ruled out
+explicitly: the region changes MORE than actively-animated content
+elsewhere, so it isn't frozen). Explicitly a SEPARATE hypothesis from
+SDL/0128-0132's CPU-bus dosmemput/dosmemget readback puzzle -- the CRTC
+governs display scanout, architecturally independent from the banked
+window's read/write bus semantics, so this and the GR04/05 Read Mode
+theory could both be real and unrelated to each other.
+
+Deliberately does not attempt the *2 -> logical-width conversion as a
+final answer -- vendor-specific extension bits for higher-resolution
+modes are chip-specific and not decoded here; logs the raw register so
+the multiplier can be confirmed once real data is in hand rather than
+guessed at.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 39 ++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index c391a2585..05ef458af 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1266,6 +1266,45 @@ static void dos_bank_chunk_probe_resolve(void)
+             "GR08(BitMask)=0x%02x",
+             gr[0], gr[1], (gr[1] >> 3) & 1, gr[1] & 3, gr[2], gr[3]);
+     }
++
++    // SDL/0133: one-time CRTC Offset Register (index 0x13) read, via the
++    // standard color-CRTC index/data port pair 0x3D4/0x3D5 present on
++    // every VGA-compatible chip. This is "detected" ground truth for the
++    // scanout stride the DISPLAY HARDWARE actually uses, independent of
++    // whatever BytesPerScanLine the VBE BIOS's GetModeInfo call
++    // ("declared", per this hub's harness-invariants.md) reported at
++    // mode-set time -- this backend's mode-set path (SDL_dosmodes.c)
++    // never calls VBE function 4F06 (Set/Get Logical Scan Line Length)
++    // and never reads this register back, so BytesPerScanLine/vram_pitch
++    // is trusted with no independent verification against the hardware
++    // that actually matters for what's displayed. A stride mismatch here
++    // is architecturally UNRELATED to SDL/0128-0132's CPU-bus
++    // dosmemput/dosmemget readback investigation (the CRTC governs
++    // display scanout, not the CPU's read/write bus into VRAM through
++    // the banked window) -- this tests a second, independent hypothesis
++    // for the ORIGINAL visual corruption, not the readback puzzle.
++    //
++    // Standard VGA convention is actual_stride_bytes = CRTC[0x13] * 2 in
++    // byte-addressing mode (the common case); some chips select a
++    // different multiplier or extend the register's range via
++    // vendor-specific bits elsewhere (e.g. CRTC[0x17] bit 6, or an
++    // extended-offset bit on some SVGA chips) -- deliberately NOT decoded
++    // here since that's chip-specific and would be guessing. Log the raw
++    // register plus the *2 interpretation next to vram_pitch so a human
++    // (or a future patch, once the right multiplier for this specific
++    // chip is confirmed) can compare them directly.
++    {
++        outportb(0x3D4, 0x13);
++        const Uint8 crtc13 = inportb(0x3D5);
++        dos_port_dbg_log(
++            "sdl: SDL/0133 CRTC-OFFSET-DUMP (read-only, ports 0x3D4/0x3D5) "
++            "CRTC13(Offset)=0x%02x (*2=%u bytes, standard VGA byte-mode "
++            "convention -- may need a different multiplier on this chip) "
++            "vs vram_pitch=%d (BIOS-declared BytesPerScanLine, never "
++            "independently verified against this register by this "
++            "backend's mode-set path)",
++            crtc13, (unsigned)crtc13 * 2, fb_state.vram_pitch);
++    }
+ }
+ 
+ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+-- 
+2.47.3
+

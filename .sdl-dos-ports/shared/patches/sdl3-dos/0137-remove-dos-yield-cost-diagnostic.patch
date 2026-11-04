@@ -1,0 +1,205 @@
+From 05f6a50a1c12527b26d18d6780b128037f9368e3 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Mon, 31 Aug 2026 13:15:41 -0700
+Subject: [PATCH] dos: patch 0137 -- remove SDL/0136's temporary DOS_Yield()
+ cost diagnostic
+
+Straight revert of SDL/0136, whose own commit message committed to this:
+"Temporary, to be reverted once the investigation concludes."
+
+WHY NOW: the investigation concluded, and 0136 answered its question.
+It measured DOS_Yield()'s steady-state cost at ~0.24-0.34ms/call with
+near-zero spikes -- eliminating it as the frame-pacer overshoot source --
+and its exit-error field then found the actual mechanism: the pacer was
+landing 1.21ms past its deadline every frame, matching both DJGPP
+delay(1)'s measured 1.236ms quantum and the 1.148ms/frame the fps gap
+worked out to. Same number three ways. 0136 also incidentally gave the
+first real-hardware confirmation that uclock() is non-monotonic on this
+hardware (~1 corrupt sample per 1800 frames), which is recorded in
+docs/timing.md. Nothing further is waiting on it.
+
+WHY IT MUST NOT SIMPLY BE LEFT: 0136 is not free. Its per-yield-call
+timing costs a MEASURED 0.70ms/frame -- roughly 0.15fps on a 486DX2-66 --
+and shared/ is consumed by every port via submodule pin. Left landed, it
+becomes a permanent, silent tax on ports that never asked for the
+diagnostic and have no reason to suspect a patch series for their
+numbers. It also made dossage's own validated result non-reproducible
+from the pinned series: the measured 14.936fps binary has 0136 reverted
+locally, so a rebuild from the pin alone would quietly disagree.
+
+The reverted file is byte-identical to the pre-0136 tree, verified by
+diff against 0136's parent; no other file is touched.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/timer/dos/SDL_systimer.c | 131 +----------------------------------
+ 1 file changed, 2 insertions(+), 129 deletions(-)
+
+diff --git a/src/timer/dos/SDL_systimer.c b/src/timer/dos/SDL_systimer.c
+index cdd0723ee..b1af263e4 100644
+--- a/src/timer/dos/SDL_systimer.c
++++ b/src/timer/dos/SDL_systimer.c
+@@ -24,7 +24,6 @@
+
+ #include <dos.h>  /* delay */
+ #include <time.h> /* uclock, uclock_t, UCLOCKS_PER_SEC */
+-#include <stdio.h> /* TEMPORARY DIAGNOSTIC: YIELDDBG.LOG, see SDL_SYS_DelayNS */
+
+ #include "../../core/dos/SDL_dos_scheduler.h"
+ #include <SDL3/SDL_dosopltimer.h>  /* SDL/0122: pump-aware timebase */
+@@ -64,40 +63,6 @@ Uint64 SDL_GetPerformanceFrequency(void)
+     return (Uint64)UCLOCKS_PER_SEC;
+ }
+
+-/* TEMPORARY DIAGNOSTIC (YIELDDBG.LOG): investigating the last ~1fps gap to
+-   dossage's 15fps KPI on 486-class hardware. A prior probe (tests/probes/
+-   dlygran.c) already measured DJGPP libc delay()'s own granularity on real
+-   486DX2-66 hardware and found it fine-grained (~1.236ms mean, not the
+-   BIOS-tick-quantized ~55ms a long-standing comment above assumed) --
+-   ELIMINATED as the overshoot source. This block tests the next candidate:
+-   DOS_Yield()'s own per-call cost. Real precedent exists in this exact
+-   codebase -- a different DOS_Yield() call site (DOSVESA_PumpEvents, fixed
+-   by shared/patches/sdl3-dos/0021) was measured at ~115ms/call on real
+-   hardware, caused by a cooperative round-trip into the audio thread's
+-   WaitDevice spin. That patch never touched THIS call site, and dossage
+-   runs continuous SB16-compatible DMA audio throughout every frame -- the
+-   same condition 0021 flagged as expensive. This instruments every
+-   DOS_Yield() call made from inside this function's wait loop (not the
+-   ns==0 early-return path below, and not other DOS_Yield() call sites
+-   elsewhere in the backend) with before/after dos_perf_now() timing,
+-   accumulates in-memory stats (no per-call I/O -- patch 0028 in dossage's
+-   own history found that even "every 20 frames" fopen/fprintf/fclose
+-   logging cost a real, measured ~0.4-0.5fps, so this flushes far less
+-   often, every YIELD_DIAG_FLUSH_EVERY real (ns!=0) SDL_SYS_DelayNS calls
+-   -- roughly once every ~20s of 15fps gameplay), and logs per-window
+-   yield-call min/mean/max plus a spike-count bucket sized to catch
+-   anything approaching 0021's ~115ms finding, alongside this function's
+-   own requested-vs-actual delay time so the yield cost can be directly
+-   correlated against the frame limiter's own overshoot. To be reverted
+-   once measured, same convention as dossage's own now-removed patches
+-   0010-0026 (see that history's patch 0028). */
+-#define YIELD_DIAG_FLUSH_EVERY 100
+-
+-static double yield_diag_now_ms(Uint64 ticks)
+-{
+-    return (double)ticks * 1000.0 / (double)UCLOCKS_PER_SEC;
+-}
+-
+ void SDL_SYS_DelayNS(Uint64 ns)
+ {
+     if (ns == 0) {
+@@ -111,48 +76,9 @@ void SDL_SYS_DelayNS(Uint64 ns)
+     const Uint64 delay_start = dos_perf_now();
+     const Uint64 target_ticks = (Uint64)((ns * UCLOCKS_PER_SEC) / SDL_NS_PER_SECOND);
+
+-    /* TEMPORARY DIAGNOSTIC: per-invocation yield-cost accumulators. */
+-    int yield_diag_calls_this_invocation = 0;
+-    double yield_diag_sum_ms_this_invocation = 0.0;
+-    double yield_diag_min_ms_this_invocation = -1.0;
+-    double yield_diag_max_ms_this_invocation = 0.0;
+-
+-    /* TEMPORARY DIAGNOSTIC: window accumulators, persist across calls. */
+-    static int yield_diag_invocations = 0;
+-    static int yield_diag_total_calls = 0;
+-    static double yield_diag_sum_ms = 0.0;
+-    static double yield_diag_min_ms = -1.0;
+-    static double yield_diag_max_ms = 0.0;
+-    static int yield_diag_spikes_over_10ms = 0;
+-    static int yield_diag_spikes_over_50ms = 0;
+-    static double yield_diag_sum_target_ms = 0.0;
+-    static double yield_diag_sum_actual_ms = 0.0;
+-    static int yield_diag_sum_iters = 0;
+-
+     while ((dos_perf_now() - delay_start) < target_ticks) {
+         /* Always yield first so cooperative threads can run. */
++        DOS_Yield();
+-        {
+-            Uint64 y0 = dos_perf_now();
+-            DOS_Yield();
+-            {
+-                Uint64 y1 = dos_perf_now();
+-                double yms = yield_diag_now_ms(y1 - y0);
+-                yield_diag_calls_this_invocation++;
+-                yield_diag_sum_ms_this_invocation += yms;
+-                if (yield_diag_min_ms_this_invocation < 0.0 || yms < yield_diag_min_ms_this_invocation) {
+-                    yield_diag_min_ms_this_invocation = yms;
+-                }
+-                if (yms > yield_diag_max_ms_this_invocation) {
+-                    yield_diag_max_ms_this_invocation = yms;
+-                }
+-                if (yms > 10.0) {
+-                    yield_diag_spikes_over_10ms++;
+-                }
+-                if (yms > 50.0) {
+-                    yield_diag_spikes_over_50ms++;
+-                }
+-            }
+-        }
+
+         /* If more than 1 ms remains, do a short sleep to avoid burning
+            100% CPU when no other threads need to run.  DJGPP's delay()
+@@ -163,59 +89,6 @@ void SDL_SYS_DelayNS(Uint64 ns)
+             delay(1);
+         }
+     }
+-
+-    /* TEMPORARY DIAGNOSTIC: fold this invocation into the window, flush rarely. */
+-    {
+-        double target_ms = yield_diag_now_ms(target_ticks);
+-        double actual_ms = yield_diag_now_ms(dos_perf_now() - delay_start);
+-
+-        yield_diag_invocations++;
+-        yield_diag_total_calls += yield_diag_calls_this_invocation;
+-        yield_diag_sum_ms += yield_diag_sum_ms_this_invocation;
+-        if (yield_diag_calls_this_invocation > 0) {
+-            if (yield_diag_min_ms < 0.0 || yield_diag_min_ms_this_invocation < yield_diag_min_ms) {
+-                yield_diag_min_ms = yield_diag_min_ms_this_invocation;
+-            }
+-            if (yield_diag_max_ms_this_invocation > yield_diag_max_ms) {
+-                yield_diag_max_ms = yield_diag_max_ms_this_invocation;
+-            }
+-        }
+-        yield_diag_sum_target_ms += target_ms;
+-        yield_diag_sum_actual_ms += actual_ms;
+-        yield_diag_sum_iters += yield_diag_calls_this_invocation;
+-
+-        if (yield_diag_invocations >= YIELD_DIAG_FLUSH_EVERY) {
+-            FILE *f = fopen("YIELDDBG.LOG", "ab");
+-            if (f != NULL) {
+-                fprintf(f,
+-                        "[yield-diag n=%d] avg_target_ms=%f avg_actual_ms=%f "
+-                        "avg_overshoot_ms=%f avg_yield_calls=%f "
+-                        "yield_avg_ms=%f yield_min_ms=%f yield_max_ms=%f "
+-                        "yield_spikes_gt10ms=%d yield_spikes_gt50ms=%d\n",
+-                        yield_diag_invocations,
+-                        yield_diag_sum_target_ms / yield_diag_invocations,
+-                        yield_diag_sum_actual_ms / yield_diag_invocations,
+-                        (yield_diag_sum_actual_ms - yield_diag_sum_target_ms) / yield_diag_invocations,
+-                        (double)yield_diag_sum_iters / yield_diag_invocations,
+-                        yield_diag_total_calls > 0 ? yield_diag_sum_ms / yield_diag_total_calls : 0.0,
+-                        yield_diag_min_ms < 0.0 ? 0.0 : yield_diag_min_ms,
+-                        yield_diag_max_ms,
+-                        yield_diag_spikes_over_10ms,
+-                        yield_diag_spikes_over_50ms);
+-                fclose(f);
+-            }
+-            yield_diag_invocations = 0;
+-            yield_diag_total_calls = 0;
+-            yield_diag_sum_ms = 0.0;
+-            yield_diag_min_ms = -1.0;
+-            yield_diag_max_ms = 0.0;
+-            yield_diag_spikes_over_10ms = 0;
+-            yield_diag_spikes_over_50ms = 0;
+-            yield_diag_sum_target_ms = 0.0;
+-            yield_diag_sum_actual_ms = 0.0;
+-            yield_diag_sum_iters = 0;
+-        }
+-    }
+ }
+
+-#endif /* SDL_TIMER_DOS */
++#endif /* SDL_TIMER_DOS */
+\ No newline at end of file
+-- 
+2.47.3
+

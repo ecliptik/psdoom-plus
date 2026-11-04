@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "sdldos@sdl-dos-ports": true
+  }
+}

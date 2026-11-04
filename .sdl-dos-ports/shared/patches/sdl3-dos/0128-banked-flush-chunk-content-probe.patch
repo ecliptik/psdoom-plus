@@ -1,0 +1,176 @@
+From bef93d89db21e87bb86002321640f23ffcd45a49 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 19:25:02 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0128 -- banked-flush chunk-content
+ diagnostic probe
+
+Generic, opt-in diagnostic for a real-hardware-only, DOSBox-X-clean
+corruption localized to a specific byte range in a banked-mode flush.
+Gated behind SDL_HINT_DOS_BANK_CHUNK_PROBE="<start>:<len>" (a
+VRAM-relative destination byte offset + length); off by default, one
+cached-int check plus an early-out compare per BankedDosmemput chunk
+when unset.
+
+When armed, logs bank/off_in_win/win_base alongside up to 32 bytes of
+the actual source bytes for whatever portion of the probed range the
+current chunk covers, from the exact src pointer BankedDosmemput has in
+hand -- distinguishing "the bytes SDL was asked to write were already
+wrong" (a bug upstream of this file, e.g. in the caller's own blit/rect
+math) from "the bytes going in were correct but something about the
+write/bank-switch path at that instant corrupted them" (a genuine
+hardware/BIOS quirk in the window-switch or DPMI write path) in a single
+capture, rather than needing a new theory-specific probe per hazard
+class. Rate-limited to 64 total emits per process so a live diagnostic
+session doesn't flood the log.
+
+Motivated by a real investigation on dossage/Passage's Mach64 video
+corruption: the bank-crossing arithmetic and the generic SDL blit
+conversion were both independently ruled out with evidence (an exact
+row/column bank-crossing table showing the corrupted rows aren't
+crossing points; a host-build round-trip test of the exact pixel
+format pair showing zero mismatches), narrowing the remaining
+candidates to something in the actual banked-VRAM write path itself --
+which this probe is built to distinguish directly rather than by
+further argument.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 110 +++++++++++++++++++++++++++++
+ 1 file changed, 110 insertions(+)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index 113da19cd..cd541907d 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1110,11 +1110,119 @@ SDL_FORCE_INLINE void SwitchBank(int bank, int *current_bank, Uint32 win_func_pt
+ // Same number of bytes (76800) and bank switches (2) per flush; pure
+ // visual fix, no perf delta. Verification: post-fix DOSVESA-FB-VRAM-BANK1
+ // readback should show real cloud-pixel data, not zeros.
++// SDL/0128: generic banked-flush chunk-content probe. Diagnostic-only,
++// gated behind SDL_HINT_DOS_BANK_CHUNK_PROBE="<start>:<len>" (a byte
++// offset into the destination VRAM-relative address space, e.g. the
++// dst_offset a port's own flush math computes for a suspect
++// row/column, and a byte count to snapshot). Off by default: one
++// cached-int check and an early-out compare per BankedDosmemput chunk,
++// zero hot-path cost when unset.
++//
++// Purpose: when a real-hardware-only, DOSBox-X-clean corruption is
++// localized to a specific byte range (see docs/video.md's video-
++// correctness hazards for how to get there), this answers the question
++// "are the bytes SDL is asked to write already wrong, or does something
++// about the write/bank-switch path corrupt otherwise-correct bytes" --
++// in one capture, from the actual source pointer BankedDosmemput has in
++// hand, rather than needing a second theory-specific probe per hazard
++// class. Logs bank/off_in_win/win_base alongside up to
++// DOS_BANK_CHUNK_PROBE_MAX_BYTES of the source bytes for whichever
++// portion of the probed range this chunk actually covers -- a probed
++// range wider than the per-flush chunk size can span multiple log
++// lines across successive chunks/flushes, not just one.
++#define DOS_BANK_CHUNK_PROBE_MAX_BYTES 32
++
++static int  g_bank_chunk_probe_resolved = 0;
++static int  g_bank_chunk_probe_active = 0;
++static Uint32 g_bank_chunk_probe_start = 0;
++static Uint32 g_bank_chunk_probe_len = 0;
++static int  g_bank_chunk_probe_emits_left = 64; /* rate-limit; a live probe
++                                                     session doesn't need
++                                                     more than this many
++                                                     lines to compare. */
++
++static void dos_bank_chunk_probe_resolve(void)
++{
++    if (g_bank_chunk_probe_resolved) {
++        return;
++    }
++    g_bank_chunk_probe_resolved = 1;
++    const char *h = SDL_GetHint("SDL_HINT_DOS_BANK_CHUNK_PROBE");
++    if (!h || !h[0]) {
++        return;
++    }
++    /* "<start>:<len>", both decimal. Malformed value -> stays inactive
++       rather than guessing; the boot banner below reports what was
++       actually parsed either way. */
++    char buf[32];
++    SDL_strlcpy(buf, h, sizeof(buf));
++    char *colon = SDL_strchr(buf, ':');
++    if (!colon) {
++        dos_port_dbg_log("sdl: SDL/0128 BANK-CHUNK-PROBE malformed hint "
++                         "'%s' (expected <start>:<len>) -- probe INACTIVE", h);
++        return;
++    }
++    *colon = '\0';
++    g_bank_chunk_probe_start = (Uint32)SDL_strtoul(buf, NULL, 10);
++    g_bank_chunk_probe_len   = (Uint32)SDL_strtoul(colon + 1, NULL, 10);
++    if (g_bank_chunk_probe_len == 0) {
++        dos_port_dbg_log("sdl: SDL/0128 BANK-CHUNK-PROBE len=0 in hint "
++                         "'%s' -- probe INACTIVE", h);
++        return;
++    }
++    g_bank_chunk_probe_active = 1;
++    dos_port_dbg_log("sdl: SDL/0128 BANK-CHUNK-PROBE ACTIVE start=%lu len=%lu "
++                     "(logs up to %d bytes per overlapping flush chunk, "
++                     "capped at %d total emits)",
++                     (unsigned long)g_bank_chunk_probe_start,
++                     (unsigned long)g_bank_chunk_probe_len,
++                     DOS_BANK_CHUNK_PROBE_MAX_BYTES,
++                     g_bank_chunk_probe_emits_left);
++}
++
++static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
++                                            Uint32 offset, Uint32 n,
++                                            int bank, Uint32 off_in_win,
++                                            Uint32 win_base)
++{
++    if (!g_bank_chunk_probe_active || g_bank_chunk_probe_emits_left <= 0) {
++        return;
++    }
++    const Uint32 probe_end = g_bank_chunk_probe_start + g_bank_chunk_probe_len;
++    const Uint32 chunk_end = offset + n;
++    if (offset >= probe_end || chunk_end <= g_bank_chunk_probe_start) {
++        return; /* no overlap with the probed range */
++    }
++    const Uint32 ov_start = (offset > g_bank_chunk_probe_start) ? offset : g_bank_chunk_probe_start;
++    const Uint32 ov_end   = (chunk_end < probe_end) ? chunk_end : probe_end;
++    Uint32 ov_len = ov_end - ov_start;
++    if (ov_len > DOS_BANK_CHUNK_PROBE_MAX_BYTES) {
++        ov_len = DOS_BANK_CHUNK_PROBE_MAX_BYTES;
++    }
++    const Uint32 src_rel = (ov_start - offset) + src_off;
++    char hex[DOS_BANK_CHUNK_PROBE_MAX_BYTES * 3 + 1];
++    Uint32 i;
++    for (i = 0; i < ov_len; i++) {
++        SDL_snprintf(hex + i * 3, 4, "%02x ", src[src_rel + i]);
++    }
++    hex[ov_len ? ov_len * 3 - 1 : 0] = '\0';
++    g_bank_chunk_probe_emits_left--;
++    dos_port_dbg_log(
++        "sdl: SDL/0128 BANK-CHUNK-PROBE offset=%lu..%lu (overlap %lu..%lu) "
++        "bank=%d off_in_win=%lu win_base=0x%08lx src_bytes=[%s] "
++        "(%d emits left)",
++        (unsigned long)offset, (unsigned long)chunk_end,
++        (unsigned long)ov_start, (unsigned long)ov_end,
++        bank, (unsigned long)off_in_win, (unsigned long)win_base, hex,
++        g_bank_chunk_probe_emits_left);
++}
++
+ SDL_FORCE_INLINE void BankedDosmemput(const Uint8 *src, Uint32 total_bytes, Uint32 dst_offset,
+                                       Uint32 win_gran_bytes, Uint32 win_size_bytes,
+                                       Uint32 win_base, Uint32 win_func_ptr,
+                                       int *current_bank)
+ {
++    dos_bank_chunk_probe_resolve();
+     // DOSKUTSU patch 0115 (v1.6.1 public-HW): defensive window-arithmetic
+     // clamps applied before either walk. No real VBE reports WinGranularity==0
+     // or WinGranularity>WinSize; these only keep `avail`/`n` from underflowing
+@@ -1158,6 +1266,8 @@ SDL_FORCE_INLINE void BankedDosmemput(const Uint8 *src, Uint32 total_bytes, Uint
+             }
+             SwitchBank(bank, current_bank, win_func_ptr);
+             dosmemput(src + src_off, n, win_base + off_in_win);
++            dos_bank_chunk_probe_maybe_log(src, src_off, offset, n,
++                                            bank, off_in_win, win_base);
+             {
+                 static int _p115_logged = 0;
+                 if (bank > 0 && _p115_logged == 0) {
+-- 
+2.47.3
+
