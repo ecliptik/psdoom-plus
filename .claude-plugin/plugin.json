@@ -1,0 +1,8 @@
+{
+  "name": "sdldos",
+  "description": "SDL-DOS porting program: bootstrap a new DOS port, review shared/patch changes, and run real-hardware benchmark campaigns.",
+  "version": "1.0.99",
+  "author": {
+    "name": "ecliptik"
+  }
+}

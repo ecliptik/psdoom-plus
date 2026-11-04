@@ -1,0 +1,100 @@
+# ratchet-example.yaml -- a commented example of a port's tests/ratchet.yaml
+# for shared/tools/ratchet.sh (the script's header is the format spec).
+# Paths are a port's: tools/dosbox-run.sh is the symlink into the
+# .sdl-dos-ports subtree, build/ holds the port's probe binaries. The checks
+# mirror the hub's own trial of the tool (the SB ring and deferred-MIDI probes
+# used to land SDL patches 0141-0145); swap in your port's cells.
+#
+# Strict flat YAML subset: one "key: value" per line, an item starts with
+# "  - name:", its other keys are indented four spaces. Quote a value that
+# contains " #". Unknown keys are an error.
+version: 1
+
+# Optional, run once before anything else; a failure fails every check.
+build: make probes
+build_timeout: 1800
+
+# Runs execute ONCE per invocation, however many checks read them -- a cell
+# that costs minutes is not repeated per number. Each run holds the host-wide
+# DOSBox-X lock exclusively while it runs.
+runs:
+  - name: sbring
+    kind: sb-live                  # the SB really plays: --sb-live, own xvfb-run -a
+    command: tools/dosbox-run.sh --sb-live --fast --exe build/SBRING.EXE --stdout "$RATCHET_OUT/stdout.txt"
+    timeout: 240
+  - name: midi-stall
+    kind: sb-live                  # needs an OPL3: a conf with oplmode=opl3
+    command: tools/dosbox-run.sh --sb-live --conf tests/dosbox-x-fast-opl3.conf --exe build/MIDIDEF.EXE --args A --stdout "$RATCHET_OUT/stdout.txt"
+    timeout: 240
+  - name: journeys
+    lock: shared                   # FIXED cycles only: may overlap other shared runs
+    command: tools/dosbox-run.sh --conf tests/dosbox-x-fixed40k.conf --exe build/GAME.EXE --args "--journey all" --stdout "$RATCHET_OUT/stdout.txt"
+    timeout: 1200                  # the conf sets cycles=fixed 40000 (ratchet.sh checks it)
+  - name: gate
+    kind: capture                  # screen captures: DOSBOX_DISPLAY_NUM, own Xvfb
+    display: 251
+    command: tests/harness/gate-alias.sh --out "$RATCHET_OUT/gate"
+    timeout: 3600
+
+checks:
+  # The SB driver must never write over unplayed ring audio, even under a
+  # storm of SDL_DOSAudioPump() calls (SDL 0141/0142). The control is the
+  # pre-fix build: it MUST overwrite, or this check has lost its power.
+  - name: sb-ring-overwrites
+    run: sbring
+    result: $RATCHET_OUT/stdout.txt
+    match: 'storm\+drain:'         # the summary line of the storm case
+    key: overwrites
+    compare: le
+    limit: 0
+    control: tools/dosbox-run.sh --sb-live --fast --exe build/SBR0141.EXE --args c --stdout "$RATCHET_OUT/stdout.txt"
+
+  # Exact PCM chunk accounting, silence included (SDL 0143), from the SAME run.
+  - name: sb-pcm-chunks-exact
+    run: sbring
+    result: $RATCHET_OUT/stdout.txt
+    match: 'queued->ring-drained'
+    key: pcm_irqs
+    pick: first                    # the first case's line
+    compare: eq
+    limit: 43
+
+  # Deferred MIDI writes stay on time through a 1.5 s main-loop stall (SDL 0144).
+  - name: midi-late-writes
+    run: midi-stall
+    result: $RATCHET_OUT/stdout.txt
+    match: '^  end:'
+    key: late
+    compare: le
+    limit: 0
+
+  # Screen-equality gate rows; the control breaks the present path on purpose
+  # (the gate's own BREAK switch) and must fail the gate.
+  - name: gate-rows-failed
+    run: gate
+    result: $RATCHET_OUT/gate/summary.txt
+    regex: 'rows_failed=([0-9]+)'
+    compare: le
+    limit: 0
+    control: DOSAGS_BREAK_0193=1 tests/harness/gate-alias.sh --out "$RATCHET_OUT/gate"
+
+  # Room-transition time from the fixed-cycles journey run.
+  - name: journey-room-ms
+    run: journeys
+    result: $RATCHET_OUT/stdout.txt
+    key: room_transition_ms
+    compare: le
+    limit: 900
+
+  # A known-flaky check: still run and reported, never gating, until someone
+  # fixes or deletes it.
+  - name: agsquest-row
+    kind: capture
+    command: tests/harness/gate-alias.sh --only agsquest-alias-y60 --out "$RATCHET_OUT/gate"
+    timeout: 1800
+    result: $RATCHET_OUT/gate/summary.txt
+    regex: 'rows_failed=([0-9]+)'
+    compare: le
+    limit: 0
+    quarantine: true
+    note: intermittent one-tick autopilot divergence, sound-independent

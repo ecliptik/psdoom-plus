@@ -1,0 +1,151 @@
+From 7181532bae791e4fa5d0716228a13aa9537614f4 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Thu, 24 Sep 2026 15:45:50 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0146 -- the silence throttle never
+ sleeps inside the application's pump
+
+WHY DOS NEEDS THIS: PlayDevice's silence-skip path sleeps 10 ms
+(SDL_Delay(10)). That is SDL/0050's quiescence throttle, moved from
+GetDeviceBuf into PlayDevice by 0054. It exists to stop the background
+playback thread spinning through Iterate while nothing plays. But
+PlayDevice is also reached from the APPLICATION's own loop, through
+SDL_DOSAudioPump() (SDL/0067). A port that pumps from its game loop
+therefore sleeps its game loop 10 ms on every silent buffer. dosags,
+which polls once per tick and about once per ms inside its frame wait,
+measured it on a 486 (its SDL 0213 message): pump mean 11.0 ms per poll,
+and 27.3 stable ticks/s with sound on against 37.5 with sound off.
+
+WHAT: SDL_DOSAudioPump() brackets its Iterate call with a counter,
+g_dos_in_app_pump, incremented and decremented under device->lock.
+PlayDevice's SDL_Delay(10) runs only when that counter is zero.
+  - Every other path, the device thread included, keeps the throttle
+    exactly as before, so a port with no application pump sees no
+    change.
+  - The skip itself is unchanged on every path: the silent buffer is
+    still not written, so the Sound Blaster still drains to its idle
+    pause.
+  - The pump caller paces its own calls, so it needs no throttle from
+    the driver.
+  - An OpenDevice banner states the rule.
+  - A counter rather than a bool, so a nested pump cannot clear it
+    early.
+
+Why not thread identity (dosags' first version): device->thread is set
+only after SDL_CreateThread returns, and on the cooperative scheduler the
+new audio thread runs first. It would see no device thread, skip the
+sleep, and -- with SDL/0086's yield killswitched and silence at open --
+loop WaitDevice/PlayDevice without sleeping or yielding, so main would
+never run again. With the counter, that startup path still sleeps.
+
+What it buys, measured by dosags ("D2", its lab/metric ace672be,
+LAB-S32 19.12), on a 486 at 16 bpp:
+  - the intermediate metric moved a lot: the pump fell from 8.1 ms to
+    0.4 ms;
+  - the KPI barely moved: the tick rate went 39.000 -> 39.135 (+0.135,
+    against 0.02 N-N noise), and its pre-registered target was
+    falsified. The sleep had mostly fallen in idle time; load stalls are
+    the remaining limiter.
+So land it for correctness of the pump path, not as a frame-rate win.
+See docs/optimization.md's worked example.
+
+Validation in the hub (DOSBox-X --sb-live under the host lock, a scratch
+probe; nothing queued, so every mixed buffer is silent):
+  - Outside the app pump the throttle holds. Device thread alone, 2 s
+    idle, before and after the pump calls: 127 silent skips per 2 s
+    (63/s) on 0145 and on 0146, identical.
+  - Inside the app pump it no longer sleeps. 20 SDL_DOSAudioPump() calls
+    on silence: mean 10.73 ms (max 23.81) on 0145, mean 0.64 ms (max
+    11.97) on 0146. The one ~12 ms call on 0146 waited for device->lock
+    while the device thread was in ITS throttle sleep; the pump call
+    itself did not sleep.
+  - Audio still plays: SBRING PCM chunk accounting exact (43 and 32), 0
+    overwrites across 281200 pump calls, as on 0145.
+  - The banner is in the 0146 run's SDL log only.
+NOT validated: anything on real hardware, and so the 486 timing -- both
+the cost this removes and what it buys come from dosags' own
+measurements. The emulator runs show only the mechanism.
+
+Source: dosags patches/SDL/0213 (v2, main e29ef5a6), re-derived against
+the hub series. The pump counter and PlayDevice hunks applied cleanly. The
+declaration and banner hunks were anchored on dosags-only code (its
+NO_BG_THREAD hint and 0144 diagnostic) and were rewritten. The hub banner
+states the rule without the dosags-only thread clause. Tags renumbered
+0213 -> 0146.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ src/audio/dos/SDL_dosaudio_sb.c | 35 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index e53b31239..6035e2623 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -379,6 +379,12 @@ static volatile bool g_dos_audio_hard_park = false;
+    a time anyway. */
+ static SDL_AudioDevice * volatile g_dos_audio_device = NULL;
+ 
++/* DOS-PORT patch 0146: nonzero while SDL_DOSAudioPump() (the application's own
++   loop) is running Iterate. PlayDevice skips its silence throttle only then; see
++   the comment there. A counter, not a bool, so a nested pump cannot clear it
++   early; touched only under device->lock. */
++static int g_dos_in_app_pump = 0;
++
+ /* DOSKUTSU patch (SDL/0088): ring-fill query export state. Bytes-per-frame
+    of the open device's DMA format (SB16 S16 stereo = 4), cached at OpenDevice
+    from SDL_AUDIO_FRAMESIZE(device->spec). Used by SDL_DOSAudioRingFill*() to
+@@ -3437,6 +3443,10 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+ 
+     SDL_Log("SoundBlaster opened!");
+ 
++    /* DOS-PORT patch 0146: say which paths may sleep on a silent buffer. */
++    dos_port_dbg_log("audio: SDL/0146 silence throttle skipped inside SDL_DOSAudioPump() only; "
++                     "the device thread keeps its SDL_Delay(10)");
++
+     /* DOSKUTSU patch (Phase 10 patch 0040): force-DSP-pause for fps-
+        upper-bound measurement. When SDL_HINT_DOS_AUDIO_FORCE_DSP_PAUSE=1,
+        request DSP pause immediately + suppress PlayDevice auto-resume.
+@@ -3732,7 +3742,9 @@ bool SDL_DOSAudioPump(void)
+        consistency with WaitDevice's own room check (line 720-721 of
+        this file) -- same definition of "room" = same predicate
+        boundary. */
++    g_dos_in_app_pump++;   /* DOS-PORT patch 0146: PlayDevice must not sleep the app's loop */
+     bool iter_ok = SDL_PlaybackAudioThreadIterate(device);
++    g_dos_in_app_pump--;
+     bool has_room = false;
+ 
+     if (iter_ok) {
+@@ -4254,7 +4266,28 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+                ISR increments consecutive-silent-IRQ counter -> DSP
+                auto-engage idle-pause fires when threshold met -> IRQ-5
+                stops -> fps recovered. Same mechanism as SDL/0050. */
+-            SDL_Delay(10);  /* throttle ~100 iter/sec when quiescent;
++            /* DOS-PORT patch 0146: never sleep inside the application's pump.
++               The throttle below exists to stop the background playback
++               thread spinning through Iterate while there is nothing to
++               play. PlayDevice is also reached from the application's own
++               loop through SDL_DOSAudioPump() (SDL/0067), and there the
++               10 ms sleep lands on the game loop instead: e.g. a port
++               pumping once per game tick lost ~10 ms per silent tick. The
++               pump caller paces its own calls, so it needs no throttle
++               from here. The skip itself
++               is unchanged on both paths: the silent buffer is still not
++               written, so the SB still drains to its idle pause.
++               Decided structurally -- is this call inside SDL_DOSAudioPump()? --
++               not by a hint and not by thread identity: every other path,
++               the device thread included, keeps the throttle exactly as
++               before. (Thread identity was tried first and has a startup
++               window: device->thread is assigned only after SDL_CreateThread
++               returns, and on the cooperative scheduler the new thread runs
++               first; with SDL/0086's yield killswitched and silence at open
++               it would loop without sleeping or yielding and main would never
++               run again.) */
++            if (g_dos_in_app_pump == 0)
++                SDL_Delay(10);  /* throttle ~100 iter/sec when quiescent;
+                                prevents CPU spin under cooperative
+                                scheduler. Held under device->lock per
+                                PlaybackAudioThreadIterate (SDL_audio.c:
+-- 
+2.47.3
+

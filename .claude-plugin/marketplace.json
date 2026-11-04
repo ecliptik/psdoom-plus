@@ -1,0 +1,14 @@
+{
+  "name": "sdl-dos-ports",
+  "description": "Claude Code skills for the sdl-dos-ports program: bootstrap a DOS port, review patches against the hub's landing conventions, run real-hardware benchmark and validation campaigns, and operate the DOSBox-X and vcctrl workflows.",
+  "owner": {
+    "name": "ecliptik"
+  },
+  "plugins": [
+    {
+      "name": "sdldos",
+      "source": ".",
+      "description": "SDL-DOS porting program: bootstrap a new DOS port, review shared/patch changes, and run real-hardware benchmark campaigns."
+    }
+  ]
+}

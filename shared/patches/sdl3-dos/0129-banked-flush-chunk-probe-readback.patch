@@ -1,0 +1,93 @@
+From d23b03fba1f37142a9ad82dd9f63e55dd02b45c0 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 19:43:13 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0129 -- banked-flush chunk probe:
+ post-write readback
+
+Extends SDL/0128's chunk-content probe with a post-write verification
+step: immediately after dosmemput() writes a chunk overlapping the
+probed range, dosmemget() the identical physical range back and compare
+against the exact source bytes just logged, reporting MATCH/MISMATCH.
+
+Distinguishes two candidate causes for a real-hardware-only corruption
+that's already been logged as content-correct on the way in: MATCH means
+the write is trustworthy and the corruption happens downstream of this
+function (scanout/display timing, a harder but now ruled-in
+investigation); MISMATCH means a genuine physical-write quirk on this
+addressing path (write posting, this dosmemput mode silently failing, a
+window-aliasing behavior this backend doesn't model) -- and the logged
+readback bytes show what's actually landing there instead of guessing.
+
+Same activation as 0128 (SDL_HINT_DOS_BANK_CHUNK_PROBE="<start>:<len>"),
+no new hint -- the readback is strictly additional information at
+negligible extra cost once the probe is already armed and rate-limited.
+
+Drafted from dossage's own proposal after 0128's first real-hardware
+capture: 64/64 emits identical (bank=7, off_in_win=0, plausible non-
+garbage dithered-texture-looking source bytes every time), which argues
+against a content bug upstream of the write and toward something in or
+after the physical write path -- exactly what this patch is built to
+distinguish directly.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 39 +++++++++++++++++++++++++++---
+ 1 file changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index cd541907d..7bb061791 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1206,14 +1206,45 @@ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+         SDL_snprintf(hex + i * 3, 4, "%02x ", src[src_rel + i]);
+     }
+     hex[ov_len ? ov_len * 3 - 1 : 0] = '\0';
++
++    // SDL/0129: post-write readback verification. dosmemput() above already
++    // wrote this chunk; immediately dosmemget() the SAME physical range back
++    // and compare against the src bytes just logged. This distinguishes
++    // "the write didn't land as sent" (mismatch -- a real physical-write
++    // quirk: write posting, this addressing mode silently failing, or a
++    // window-aliasing behavior this backend doesn't model) from "the write
++    // is trustworthy, corruption is downstream of it" (match -- points at
++    // scanout/display timing instead, a different and harder investigation,
++    // but a real one to rule in rather than guess at). Read at the exact
++    // physical address the write targeted: win_base + off_in_win advanced
++    // by however far into this chunk the overlap starts.
++    Uint8 readback[DOS_BANK_CHUNK_PROBE_MAX_BYTES];
++    const Uint32 phys_addr = win_base + off_in_win + (ov_start - offset);
++    dosmemget(phys_addr, ov_len, readback);
++    int mismatch_at = -1;
++    for (i = 0; i < ov_len; i++) {
++        if (readback[i] != src[src_rel + i]) {
++            mismatch_at = (int)i;
++            break;
++        }
++    }
++    char rhex[DOS_BANK_CHUNK_PROBE_MAX_BYTES * 3 + 1];
++    for (i = 0; i < ov_len; i++) {
++        SDL_snprintf(rhex + i * 3, 4, "%02x ", readback[i]);
++    }
++    rhex[ov_len ? ov_len * 3 - 1 : 0] = '\0';
++
+     g_bank_chunk_probe_emits_left--;
+     dos_port_dbg_log(
+-        "sdl: SDL/0128 BANK-CHUNK-PROBE offset=%lu..%lu (overlap %lu..%lu) "
+-        "bank=%d off_in_win=%lu win_base=0x%08lx src_bytes=[%s] "
+-        "(%d emits left)",
++        "sdl: SDL/0128+0129 BANK-CHUNK-PROBE offset=%lu..%lu (overlap "
++        "%lu..%lu) bank=%d off_in_win=%lu win_base=0x%08lx phys=0x%08lx "
++        "src_bytes=[%s] readback=[%s] verdict=%s%s (%d emits left)",
+         (unsigned long)offset, (unsigned long)chunk_end,
+         (unsigned long)ov_start, (unsigned long)ov_end,
+-        bank, (unsigned long)off_in_win, (unsigned long)win_base, hex,
++        bank, (unsigned long)off_in_win, (unsigned long)win_base,
++        (unsigned long)phys_addr, hex, rhex,
++        (mismatch_at < 0) ? "MATCH" : "MISMATCH",
++        (mismatch_at < 0) ? "" : " (write did not land as sent)",
+         g_bank_chunk_probe_emits_left);
+ }
+ 
+-- 
+2.47.3
+

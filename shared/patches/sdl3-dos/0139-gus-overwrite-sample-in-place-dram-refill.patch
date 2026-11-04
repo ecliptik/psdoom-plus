@@ -1,0 +1,240 @@
+From fbd42965f52098b745a7749356c27779032b773f Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Sun, 13 Sep 2026 12:48:08 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0139 -- SDL_DOSGusOverwriteSample,
+ in-place DRAM refill
+
+WHY DOS NEEDS THIS: SDL_DOSGusUploadSample()'s DRAM allocator
+(gus_dram_alloc) is a pure bump allocator -- every call permanently
+advances the high-water mark and returns a brand-new address. The only
+reclaim mechanism, SDL_DOSGusResetDram(keep_bytes), rewinds the entire
+allocator to one global point and invalidates everything above it. A
+caller that wants to refill the SAME fixed DRAM region repeatedly (a
+double-buffered PCM stream is the motivating case: two small half-buffers
+that get overwritten with fresh audio for as long as the stream plays)
+has no way to do that with the existing exports -- each refill would mint
+a new region instead, permanently consuming DRAM at a rate proportional
+to how long the stream plays, exhausting the card's <=1MB budget in
+around two minutes for even a single voice.
+
+SDL_DOSGusOverwriteSample(dram_addr, data, len, is16bit) writes to a
+caller-chosen address instead of bump-allocating one. It reuses the
+existing UploadSample transfer mechanics verbatim (factored out into a
+new static gus_upload_to() helper both functions now call) -- same
+8-bit-DMA-only + >=GUS_DMA_UPLOAD_MIN-bytes gate, same PIO fallback for
+16-bit or under-threshold uploads. This changes only WHERE the data
+lands, nothing about HOW it gets there or what it reads from the
+caller's buffer.
+
+Bounds-checked (dram_addr + len <= dram_size, overflow-safe) but NOT
+voice-safety-checked: the caller is responsible for never overwriting a
+region a currently active voice is reading (SDL_DOSGusGetState's
+voice_active_mask is how a caller confirms this before calling).
+
+Real-hardware note (see sdl-dos-ports' dosags PLAN.md, "S5 GUS
+architecture" section): a standalone probe (gusdmawedge.c) already
+confirmed on HW-486-66 that a DMA-based upload to a FRESHLY
+bump-allocated address does not wedge the PicoGUS while a different
+voice plays. This export changes only the destination-address source
+(caller-chosen vs bump-allocated); the transfer mechanism itself is
+identical. Still needs its own confirming real-hardware pass (a small
+gusdmawedge.c extension that overwrites an address already written once
+in the same run) before a caller depends on it -- not yet run as of this
+patch landing.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ include/SDL3/SDL_dosgus.h        |  32 +++++++++
+ src/audio/dos/SDL_dosaudio_gus.c | 119 ++++++++++++++++++++-----------
+ 2 files changed, 111 insertions(+), 40 deletions(-)
+
+diff --git a/include/SDL3/SDL_dosgus.h b/include/SDL3/SDL_dosgus.h
+index c288f5bd5..99c867916 100644
+--- a/include/SDL3/SDL_dosgus.h
++++ b/include/SDL3/SDL_dosgus.h
+@@ -149,6 +149,38 @@ extern SDL_DECLSPEC bool SDLCALL SDL_DOSGusGetState(SDL_DOSGusState *out);
+  */
+ extern SDL_DECLSPEC Uint32 SDLCALL SDL_DOSGusUploadSample(const void *data, Uint32 len, int is16bit);
+ 
++/**
++ * Upload a sample block to a CALLER-CHOSEN DRAM address, overwriting
++ * whatever was there.
++ *
++ * Unlike SDL_DOSGusUploadSample, this does NOT bump-allocate -- the caller
++ * owns the address (typically one returned by an earlier UploadSample call)
++ * and is responsible for its validity (`dram_addr + len <= dram_size`, from
++ * SDL_DOSGusGetState). Exists because UploadSample's bump allocator has no
++ * free/reuse primitive other than SDL_DOSGusResetDram's single global
++ * rewind point -- a caller that refills the SAME fixed region over and over
++ * (e.g. a double-buffered PCM stream) would otherwise permanently consume
++ * new DRAM on every refill. Mirrors UploadSample's transfer mechanics
++ * EXACTLY (same 8-bit-DMA-only + `>= GUS_DMA_UPLOAD_MIN`-bytes gate; 16-bit
++ * always takes PIO) -- this export changes only WHERE the data lands,
++ * nothing about HOW it gets there.
++ *
++ * SAFETY (caller's responsibility, not enforced here): never overwrite a
++ * region a CURRENTLY ACTIVE voice is reading -- confirm via
++ * SDL_DOSGusGetState's voice_active_mask first.
++ *
++ * \param dram_addr destination DRAM byte address (from an earlier
++ *                  UploadSample call, or the caller's own bookkeeping).
++ * \param data source sample bytes. May be a protected-mode (>1MB) pointer.
++ * \param len  length in BYTES. Must not exceed the region's original size.
++ * \param is16bit non-zero if `data` is 16-bit signed PCM.
++ * \returns true on success, false on failure (`dram_addr + len` beyond the
++ *          card's detected DRAM, or the GF1 is not active).
++ *
++ * \since DOSKUTSU patch SDL/0139.
++ */
++extern SDL_DECLSPEC bool SDLCALL SDL_DOSGusOverwriteSample(Uint32 dram_addr, const void *data, Uint32 len, int is16bit);
++
+ /**
+  * Rewind the DRAM bump allocator, preserving a low keep region.
+  *
+diff --git a/src/audio/dos/SDL_dosaudio_gus.c b/src/audio/dos/SDL_dosaudio_gus.c
+index dc8503697..ed88077d7 100644
+--- a/src/audio/dos/SDL_dosaudio_gus.c
++++ b/src/audio/dos/SDL_dosaudio_gus.c
+@@ -1180,6 +1180,54 @@ bool SDL_DOSGusGetState(SDL_DOSGusState *out)
+     return true;
+ }
+ 
++/* patch 0139: the actual transfer dispatch, factored out of
++   SDL_DOSGusUploadSample so SDL_DOSGusOverwriteSample can reuse it against a
++   CALLER-CHOSEN address instead of a freshly bump-allocated one. Changes
++   only WHERE the data lands (the `dram_addr` argument); the transport
++   selection and every byte read out of `data` are unchanged from before
++   this patch existed as a separate function. */
++static void gus_upload_to(Uint32 dram_addr, const void *data, Uint32 len, int is16bit)
++{
++    /* uploaded VERBATIM -- no sign conversion (caller hands native GF1 format:
++       8-bit unsigned / 16-bit signed). DEFAULT path = PIO (#36): proven on real
++       HW (same mechanism as detection's DRAM poke/peek) and immune to the ISA
++       8237 64KB-page crash. DMA (64KB-safe chunked) is OPT-IN via
++       SDL_HINT_DOS_GUS_DMA_UPLOAD=1, and only for 8-bit samples >= the
++       threshold; 16-bit always takes PIO (sidesteps the 16-bit DMA dest quirk).
++
++       Both transports read EXACTLY [data, data+len): PIO is strictly byte-wise
++       (src[i] single bytes, no word/dword over-read), DMA is SDL_memcpy(nbytes)
++       (bounded). So a host page-fault during the read means `len` EXCEEDS the
++       caller's `data` buffer -- a caller-side length bug, NOT a transport
++       over-read (#38: PIO and DMA fault identically, which a word-alignment
++       over-read could not cause since PIO reads single bytes). */
++    const int want_dma = (g_gus_dma_upload && !is16bit && len >= GUS_DMA_UPLOAD_MIN);
++    g_gus_n_upload++;
++    /* DIAG (#38): logged + fsync'd BEFORE reading the host buffer, so if a
++       too-large `len` over-reads `data` into an unmapped DPMI page and hard-
++       faults, this is the LAST log line -- naming the culprit upload
++       (fx#/len/method/dram_addr). Pairs with the engine's per-.pxt
++       synth-size vs len-passed log to localize the mismatch. */
++    if (g_gus_diag) {
++        /* gus-9: memory-only -- NO GF1 read here. Dropped the gus-5
++           active_mask GetState call (a 0x80 read inside a diag block); this
++           PicoGUS wedges on ANY diag-added GF1 read. The live mask still
++           reaches the log via the GUS_DR_MASK ring record (sourced from the
++           core, non-diag GetState 0x80 read that already runs in the reap). */
++        dos_port_dbg_log("audio: SDL/0112 GUS upload #%u (start): src=%p len=%u "
++                         "dram=0x%X %s via=%s used=%uKB/%uKB",
++                         g_gus_n_upload, data, (unsigned)len, (unsigned)dram_addr,
++                         is16bit ? "16b" : "8b", want_dma ? "dma" : "pio",
++                         (unsigned)(g_gus_dram_used / 1024),
++                         (unsigned)(g_gus_dram_size / 1024));
++    }
++    if (want_dma && gus_upload_dma(dram_addr, (const Uint8 *)data, len)) {
++        /* uploaded via DMA */
++    } else {
++        gus_upload_pio(dram_addr, (const Uint8 *)data, len);
++    }
++}
++
+ Uint32 SDL_DOSGusUploadSample(const void *data, Uint32 len, int is16bit)
+ {
+     Uint32 dram_addr;
+@@ -1196,46 +1244,7 @@ Uint32 SDL_DOSGusUploadSample(const void *data, Uint32 len, int is16bit)
+     if (dram_addr == SDL_DOSGUS_BAD_ADDR) {
+         return SDL_DOSGUS_BAD_ADDR;
+     }
+-    /* uploaded VERBATIM -- no sign conversion (caller hands native GF1 format:
+-       8-bit unsigned / 16-bit signed). DEFAULT path = PIO (#36): proven on real
+-       HW (same mechanism as detection's DRAM poke/peek) and immune to the ISA
+-       8237 64KB-page crash. DMA (64KB-safe chunked) is OPT-IN via
+-       SDL_HINT_DOS_GUS_DMA_UPLOAD=1, and only for 8-bit samples >= the
+-       threshold; 16-bit always takes PIO (sidesteps the 16-bit DMA dest quirk).
+-
+-       Both transports read EXACTLY [data, data+len): PIO is strictly byte-wise
+-       (src[i] single bytes, no word/dword over-read), DMA is SDL_memcpy(nbytes)
+-       (bounded). So a host page-fault during the read means `len` EXCEEDS the
+-       caller's `data` buffer -- a caller-side length bug, NOT a transport
+-       over-read (#38: PIO and DMA fault identically, which a word-alignment
+-       over-read could not cause since PIO reads single bytes). */
+-    {
+-        const int want_dma = (g_gus_dma_upload && !is16bit && len >= GUS_DMA_UPLOAD_MIN);
+-        g_gus_n_upload++;
+-        /* DIAG (#38): logged + fsync'd BEFORE reading the host buffer, so if a
+-           too-large `len` over-reads `data` into an unmapped DPMI page and hard-
+-           faults, this is the LAST log line -- naming the culprit upload
+-           (fx#/len/method/dram_addr). Pairs with the engine's per-.pxt
+-           synth-size vs len-passed log to localize the mismatch. */
+-        if (g_gus_diag) {
+-            /* gus-9: memory-only -- NO GF1 read here. Dropped the gus-5
+-               active_mask GetState call (a 0x80 read inside a diag block); this
+-               PicoGUS wedges on ANY diag-added GF1 read. The live mask still
+-               reaches the log via the GUS_DR_MASK ring record (sourced from the
+-               core, non-diag GetState 0x80 read that already runs in the reap). */
+-            dos_port_dbg_log("audio: SDL/0112 GUS upload #%u (start): src=%p len=%u "
+-                             "dram=0x%X %s via=%s used=%uKB/%uKB",
+-                             g_gus_n_upload, data, (unsigned)len, (unsigned)dram_addr,
+-                             is16bit ? "16b" : "8b", want_dma ? "dma" : "pio",
+-                             (unsigned)(g_gus_dram_used / 1024),
+-                             (unsigned)(g_gus_dram_size / 1024));
+-        }
+-        if (want_dma && gus_upload_dma(dram_addr, (const Uint8 *)data, len)) {
+-            /* uploaded via DMA */
+-        } else {
+-            gus_upload_pio(dram_addr, (const Uint8 *)data, len);
+-        }
+-    }
++    gus_upload_to(dram_addr, data, len, is16bit);
+     /* gus-9: the gus-8 on_song_start data-present PEEK (6x gus_peek on the GF1
+        DRAM port) is REMOVED -- it wedged the PicoGUS (any diag-added GF1 read
+        does, even main-context with voices stopped). The datum it gave already
+@@ -1245,6 +1254,36 @@ Uint32 SDL_DOSGusUploadSample(const void *data, Uint32 len, int is16bit)
+     return dram_addr;
+ }
+ 
++/* patch 0139: overwrite an already-allocated DRAM region in place. See
++   SDL_dosgus.h's own doc comment for the full rationale (UploadSample's
++   bump allocator has no reuse primitive; a caller that refills the same
++   fixed address repeatedly -- e.g. a double-buffered PCM stream -- would
++   otherwise permanently consume new DRAM on every refill until the card's
++   <=1MB budget is exhausted, typically within a couple of minutes). Reuses
++   gus_upload_to() verbatim: this function changes only the destination
++   address, nothing about the transfer mechanics gusdmawedge.c's own
++   real-hardware pass already exercised (that pass targeted a freshly
++   bump-allocated address; this path targets a caller-supplied one -- the
++   confirming extension to that probe, not yet run on real hardware as of
++   this patch landing, is what actually validates the "inherits the
++   existing wedge finding by construction" claim below). */
++bool SDL_DOSGusOverwriteSample(Uint32 dram_addr, const void *data, Uint32 len, int is16bit)
++{
++    if (!g_gus_active || !data || len == 0) {
++        return false;
++    }
++    /* Overflow-safe bounds check: dram_addr + len must not wrap Uint32
++       before comparing against dram_size. */
++    if (len > g_gus_dram_size || dram_addr > g_gus_dram_size - len) {
++        return false;
++    }
++    if (g_gus_diag) {
++        gus_diag_flush();
++    }
++    gus_upload_to(dram_addr, data, len, is16bit);
++    return true;
++}
++
+ void SDL_DOSGusResetDram(Uint32 keep_bytes)
+ {
+     if (!g_gus_active) {
+-- 
+2.47.3
+

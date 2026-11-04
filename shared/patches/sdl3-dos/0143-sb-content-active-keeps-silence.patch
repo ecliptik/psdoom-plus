@@ -1,0 +1,202 @@
+From bbcb5be4fef493e2434794e9726f90dbabe3a85d Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 23 Sep 2026 00:07:01 -0700
+Subject: [PATCH 3/3] [SDL3-DOS] dos: patch 0143 --
+ SDL_DOSAudioSetContentActive: the SB silence gate keeps a sound's own silence
+
+WHY DOS NEEDS THIS: DOSSOUNDBLASTER_PlayDevice's post-mix silence gate
+(SDL/0054, "Shape A") drops every buffer that is silent in the DEVICE
+format instead of writing it to the ring. Between sounds that is its
+purpose (the ring drains; with idle-pause enabled the DSP pauses).
+During a sound it removes time, in two forms:
+  (a) a clip's own digital-zero stretches are dropped on every path;
+  (b) on the 8-bit path, SDL's F32 -> U8 conversion rounds |s| < 128 (of
+      32768) to 0x80, so every chunk quieter than ~-48 dBFS is also
+      "silent" and dropped.
+A dropped chunk either becomes a silent IRQ (ring empty: timing kept,
+but counted as a dropout by any port that watches silent IRQs) or, with
+audio queued behind it, the next audible chunk plays early and the
+clip's pauses shrink.
+
+Evidence (dosags, PLAN.md step 8, "Sound-9 / dropout investigation",
+2026-09-22):
+  - Real hardware (8.3 round, PicoGUS in SB mode on the 8-bit path; the
+    defect, not the fix): ~50 silent IRQs per play of 5 Days a Stranger's
+    sound 9, whose 4.10 s clip is 52 of 88 512-sample windows exact
+    digital zero -- the "dropouts" were the clip's own silence; expected
+    vs played PCM chunks 1617 vs 1513 and 1304 vs 1199 in two runs; sound
+    10 (9.76 s) played ~9.0 s against ~10.0 s in the DOSBox-X reference.
+  - DOSBox-X --sb-live, throwaway chunk classifier (UR8): chunk accounting
+    is exact -- 16-bit path pcm IRQs 582 = 639 mixed - 57 zero; 8-bit
+    path 516 = 605 - 59 zero - 29 quiet (+-1). Gate off
+    (SDL_HINT_DOS_SILENCE_DETECT=0, UR6): no silent IRQs across two
+    sound-9 plays, against 27 with it on.
+  - With this patch and dosags driving the flag (DOSBox-X --sb-live, cells
+    CA16, CA16B, CA8): pcm_irqs equals the expected content chunks plus
+    drains EXACTLY on both paths (16-bit 127/127 and 1298/1298, 8-bit
+    1361/1361, zero windows included), no silent IRQ during any sound-9
+    play (4 plays; the build without it: 37 over 3), idle silence still
+    skipped (skipped_silent 5608-7638 per run), overwrites 0.
+Hardware confirmation of the fix pending.
+
+Why not the simpler alternatives:
+  - Judging silence before format conversion would not help: a chunk that
+    rounds to all 0x80 is also silent when played, so nothing audible is
+    lost -- only TIME, the same defect as (a).
+  - "Keep silence while the ring holds audio" cannot work: SDL3's playback
+    iterate fills an empty stream with silence and still calls PlayDevice
+    (SDL_audio.c, br < buffer_size -> memset), so after the first sound
+    the ring would never empty and the gate would never skip again.
+  - SDL_HINT_DOS_SILENCE_DETECT=0 (zero code) removes the loss but lets
+    idle silence fill the ring to capacity, so every new sound queues
+    behind up to a ring's worth (~0.74 s at the default depth) of silence.
+What decides it is whether content is playing, and only the port's own
+mixer knows that.
+
+WHAT: SDL_DOSAudioSetContentActive(bool) (SDL_dosaudio_pump.h). While
+true, PlayDevice skips the silence scan and writes silent buffers like
+any other; the gate, its SDL_Delay(10) throttle and idle-pause are
+untouched otherwise. Default false: a port that never calls it -- every
+SDL_mixer port, and anything scaffolded from this series before now --
+gets the gate's behaviour unchanged; the only other change on that path
+is two counter increments. Two monotonic counters beside the other
+per-IRQ audio counters (SDL_dos_audio_synth.h), for the port to report:
+dos_port_audio_skipped_silent_count (buffers the gate dropped) and
+dos_port_audio_idle_pause_count (DSP idle-pause commands issued).
+
+Source: dosags patches/SDL/0192 (From 00a6f143b44b), re-derived here
+against the hub series (line offset only). Comment tags renumbered
+0192 -> 0143; the flag and setter moved above the SDL/0088 ring-fill
+comment block rather than between that block and the function it
+documents (placement only).
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ include/SDL3/SDL_dosaudio_pump.h   | 20 ++++++++++++++++++++
+ src/audio/dos/SDL_dosaudio_sb.c    | 22 +++++++++++++++++++++-
+ src/core/dos/SDL_dos_audio_synth.c |  6 ++++++
+ src/core/dos/SDL_dos_audio_synth.h |  5 +++++
+ 4 files changed, 52 insertions(+), 1 deletion(-)
+
+diff --git a/include/SDL3/SDL_dosaudio_pump.h b/include/SDL3/SDL_dosaudio_pump.h
+index 0275aec64..91dea200d 100644
+--- a/include/SDL3/SDL_dosaudio_pump.h
++++ b/include/SDL3/SDL_dosaudio_pump.h
+@@ -434,6 +434,26 @@ extern SDL_DECLSPEC int SDLCALL SDL_DOSAudioPhysicalCapacityFrames(void);
+  */
+ extern SDL_DECLSPEC int SDLCALL SDL_DOSAudioIsrRingWrite(void);
+ 
++/**
++ * DOS-PORT patch 0143: tell the SB driver whether sound content is playing.
++ *
++ * The driver's post-mix silence gate drops any buffer that is silent in the
++ * device format instead of writing it to the ring. Between sounds that is the
++ * point (the ring drains, the device idles). DURING a sound it removes time:
++ * a clip's own digital-zero pause, or on the 8-bit path any passage quieter
++ * than one U8 step, is dropped and the next audible chunk plays early -- the
++ * sound comes out shorter, with its pauses shortened.
++ *
++ * While `active` is true, silent buffers are written like any other. Set it
++ * true while the port's own mixer still has audio to deliver, false when
++ * everything it started has been fully handed to SDL. A port that never calls
++ * this gets the gate exactly as before (the default is false).
++ *
++ * \param active true while content is playing.
++ * \threadsafety Call from the thread that feeds the audio stream.
++ */
++extern SDL_DECLSPEC void SDLCALL SDL_DOSAudioSetContentActive(bool active);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index 9309470ee..bcfced73f 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -987,6 +987,17 @@ static void dos_sfx_synth_recompute_ratediv(void)
+     }
+ }
+ 
++/* DOS-PORT patch 0143: content-active flag for PlayDevice's silence gate.
++   Written by the engine's main thread, read by PlayDevice under
++   device->lock (audio thread or SDL_DOSAudioPump); a single aligned bool, so
++   a racing read sees either value, and either is safe. */
++static volatile bool g_dos_audio_content_active = false;
++
++void SDL_DOSAudioSetContentActive(bool active)
++{
++    g_dos_audio_content_active = active;
++}
++
+ /* ========================================================================
+  * DOSKUTSU patch (SDL/0088): ring-fill query export
+  * ========================================================================
+@@ -1817,6 +1828,7 @@ static void MaybeServiceIdlePauseRequests(void)
+         WriteSoundBlasterDSP(cmd);
+         isr_dsp_paused = true;
+         g_dos_audio_pause_request = false;
++        dos_port_audio_idle_pause_count++; /* DOS-PORT patch 0143 */
+     }
+ }
+ 
+@@ -3872,7 +3884,14 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+        g_dos_silence_detect_enabled (above the static decl) for the
+        rationale on keeping the perf switch separate from the
+        legacy-compat / shutdown flag. */
+-    if (g_dos_silence_detect_enabled && !g_dos_audio_quiescence_gate_disabled) {
++    /* DOS-PORT patch 0143: while the port says content is playing
++       (SDL_DOSAudioSetContentActive(true)), a silent buffer is part of that
++       content -- a clip's own pause, or on the 8-bit path any passage quieter
++       than one U8 step -- and skipping it would remove its TIME from the
++       sound (the ring then plays the next audible chunk early). Write it like
++       any other buffer. Default false: a port that never calls the API gets
++       the gate exactly as before. */
++    if (g_dos_silence_detect_enabled && !g_dos_audio_quiescence_gate_disabled && !g_dos_audio_content_active) {
+         bool all_silence;
+         /* DOSKUTSU patch (Phase 11 patch 0057): Shape D mixer-flag
+            fast-path. When SHAPE=D is engaged, replace the Shape A
+@@ -3985,6 +4004,7 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+             }
+         }
+         if (all_silence) {
++            dos_port_audio_skipped_silent_count++; /* DOS-PORT patch 0143 */
+             /* Skip the ring write -- ring continues to drain via IRQ ->
+                ISR increments consecutive-silent-IRQ counter -> DSP
+                auto-engage idle-pause fires when threshold met -> IRQ-5
+diff --git a/src/core/dos/SDL_dos_audio_synth.c b/src/core/dos/SDL_dos_audio_synth.c
+index 0ac709b93..b373664ff 100644
+--- a/src/core/dos/SDL_dos_audio_synth.c
++++ b/src/core/dos/SDL_dos_audio_synth.c
+@@ -1887,6 +1887,12 @@ volatile uint32_t dos_port_audio_silent_irq_count = 0;
+    device->lock), read by the engine. Monotonic; never reset. */
+ volatile uint32_t dos_port_audio_ring_overwrite_count = 0;
+ 
++/* DOS-PORT patch 0143: PlayDevice buffers the silence gate dropped instead of
++   writing them to the ring, and DSP idle-pause commands issued. Monotonic;
++   never reset; read by the engine. See SDL_DOSAudioSetContentActive(). */
++volatile uint32_t dos_port_audio_skipped_silent_count = 0;
++volatile uint32_t dos_port_audio_idle_pause_count = 0;
++
+ /* DOSKUTSU patch (Phase 11 patch 0071): Lever 3 ISR-channel-pool
+    active counter. Dual-writer (engine ++ in SDL_DOSSfxSynthStart, ISR
+    -- at end-of-buffer). Atomicity required: both writers use
+diff --git a/src/core/dos/SDL_dos_audio_synth.h b/src/core/dos/SDL_dos_audio_synth.h
+index 3e22911f9..548680157 100644
+--- a/src/core/dos/SDL_dos_audio_synth.h
++++ b/src/core/dos/SDL_dos_audio_synth.h
+@@ -412,6 +412,11 @@ extern volatile uint32_t dos_port_audio_silent_irq_count;
+    See SDL_dos_audio_synth.c. */
+ extern volatile uint32_t dos_port_audio_ring_overwrite_count;
+ 
++/* DOS-PORT patch 0143: silence-gate skips and DSP idle-pauses. See
++   SDL_dos_audio_synth.c. */
++extern volatile uint32_t dos_port_audio_skipped_silent_count;
++extern volatile uint32_t dos_port_audio_idle_pause_count;
++
+ /* DOSKUTSU patch (SDL/0096): cumulative WaveBlaster MIDI byte-dispatch
+    counter. Incremented once per SDL_DOSMpu401WriteByte (every MIDI byte
+    handed to the WB transport -- direct-port 0x330 or DSP-mediated). Single
+-- 
+2.47.3
+

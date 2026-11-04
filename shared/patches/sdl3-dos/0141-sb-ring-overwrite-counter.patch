@@ -1,0 +1,114 @@
+From ec5b8a2581c2e6a306198421f122305115ad837c Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 23 Sep 2026 00:05:50 -0700
+Subject: [PATCH 1/3] [SDL3-DOS] dos: patch 0141 -- count SB ring writes that
+ overrun unplayed audio
+
+WHY DOS NEEDS THIS: DOSSOUNDBLASTER_PlayDevice copies each mixed chunk
+into the ISR ring with no room check of its own. Room is checked only in
+DOSSOUNDBLASTER_WaitDevice, which only SDL's background thread loop
+(while (Iterate()) WaitDevice()) runs. SDL_DOSAudioPump() (patch 0067)
+calls SDL_PlaybackAudioThreadIterate() directly, with no WaitDevice, and
+looks at room only afterwards, for its return value. A port that pumps
+while the ring is full therefore overwrites the chunk the IRQ handler
+plays next -- audible as a skip, and a clip "finishes" in engine time
+well before it has played. Nothing counted that event, so whether it
+happens, and whether a fix for it works, could only be argued from
+source, not measured.
+
+How it surfaced (dosags, PLAN.md step 8, "UR1", 2026-09-22):
+SDL_DOSAudioRingFillMs() read 232 -> 4086 ms against a 743 ms ring. The
+fill is ring_write - isr_ring_read with both cursors monotonic, so a
+value above ring_size means the writer lapped the reader. That UR1 run
+was under DOSBox-X with its Sound Blaster switched off (dosbox-run.sh's
+-silent, before --sb-live existed), so the ISR never drained and the
+figure's size says nothing about a real device; the lap itself is still
+a write over unplayed data, which is what this counts.
+
+WHAT: a monotonic dos_port_audio_ring_overwrite_count
+(SDL_dos_audio_synth.c, beside the other per-IRQ audio counters),
+incremented in PlayDevice once per write where
+(ring_write - isr_ring_read) + buffer_size > ring_size, before the copy.
+Counting only; behaviour is unchanged. The ISR may advance isr_ring_read
+between the check and the copy, so the count can over-state by a write
+that raced a drain, never under-state. A port reads it through the
+extern in SDL_dos_audio_synth.h, as it does the other counters there.
+The fix is the next patch (0142), so the "before" is measurable on the
+same counter.
+
+Measured with it (dosags, DOSBox-X --sb-live equivalent: no -silent, SB
+detection on; 5 Days a Stranger in play, OPL3 music, SB PCM SFX; cells
+OVW1/OVW3): overwrites=38 and 19, peak fill 1625 and 1578 ms against
+743. Emulator only; the counter's real-hardware reading is part of a
+hardware re-run still pending.
+
+Source: dosags patches/SDL/0190 (From 0a7ec940ef43), re-derived here
+against the hub series (applies at a line offset only; the dosags-only
+patches between 0140 and 0190 do not touch these functions). Comment
+tags renumbered 0190 -> 0141.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ src/audio/dos/SDL_dosaudio_sb.c    | 9 +++++++++
+ src/core/dos/SDL_dos_audio_synth.c | 8 ++++++++
+ src/core/dos/SDL_dos_audio_synth.h | 4 ++++
+ 3 files changed, 21 insertions(+)
+
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index f66645b5f..a2e06d64f 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -4033,6 +4033,15 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+     const int pos = hidden->ring_write & mask;
+     const int first = (pos + buffer_size <= hidden->ring_size) ? buffer_size : (hidden->ring_size - pos);
+ 
++    /* DOS-PORT patch 0141: this write has no room check of its own (the
++       background thread's WaitDevice checks room before its Iterate, but
++       SDL_DOSAudioPump's Iterate does not), so count every write that lands
++       on bytes the ISR has not played yet. isr_ring_read only grows, so a
++       stale read here can only over-state the fill, never hide an overrun. */
++    if ((hidden->ring_write - isr_ring_read) + buffer_size > hidden->ring_size) {
++        dos_port_audio_ring_overwrite_count++;
++    }
++
+     SDL_memcpy(hidden->ring_buffer + pos, buffer, first);
+     if (first < buffer_size) {
+         SDL_memcpy(hidden->ring_buffer, buffer + first, buffer_size - first);
+diff --git a/src/core/dos/SDL_dos_audio_synth.c b/src/core/dos/SDL_dos_audio_synth.c
+index 0a6893e9b..0ac709b93 100644
+--- a/src/core/dos/SDL_dos_audio_synth.c
++++ b/src/core/dos/SDL_dos_audio_synth.c
+@@ -1879,6 +1879,14 @@ volatile uint32_t dos_port_mpu_drr_cap = 10000;
+    Per docs/internal/PIXTONE-MULTISOURCE-DESIGN.md sec.2.1 #2. */
+ volatile uint32_t dos_port_audio_silent_irq_count = 0;
+ 
++/* DOS-PORT patch 0141: cumulative ring-overwrite counter. Incremented by
++   DOSSOUNDBLASTER_PlayDevice once per write whose chunk does not fit in the
++   ring's free space (write - read + chunk > ring_size): that write lands on
++   bytes the IRQ handler has not played yet. Written only from PlayDevice
++   (audio thread or the engine's SDL_DOSAudioPump call, both under
++   device->lock), read by the engine. Monotonic; never reset. */
++volatile uint32_t dos_port_audio_ring_overwrite_count = 0;
++
+ /* DOSKUTSU patch (Phase 11 patch 0071): Lever 3 ISR-channel-pool
+    active counter. Dual-writer (engine ++ in SDL_DOSSfxSynthStart, ISR
+    -- at end-of-buffer). Atomicity required: both writers use
+diff --git a/src/core/dos/SDL_dos_audio_synth.h b/src/core/dos/SDL_dos_audio_synth.h
+index 577a62fc6..3e22911f9 100644
+--- a/src/core/dos/SDL_dos_audio_synth.h
++++ b/src/core/dos/SDL_dos_audio_synth.h
+@@ -408,6 +408,10 @@ extern volatile uint32_t dos_port_audio_sfx_active_count;
+    probe contract. */
+ extern volatile uint32_t dos_port_audio_silent_irq_count;
+ 
++/* DOS-PORT patch 0141: PlayDevice writes that overran unplayed ring data.
++   See SDL_dos_audio_synth.c. */
++extern volatile uint32_t dos_port_audio_ring_overwrite_count;
++
+ /* DOSKUTSU patch (SDL/0096): cumulative WaveBlaster MIDI byte-dispatch
+    counter. Incremented once per SDL_DOSMpu401WriteByte (every MIDI byte
+    handed to the WB transport -- direct-port 0x330 or DSP-mediated). Single
+-- 
+2.47.3
+

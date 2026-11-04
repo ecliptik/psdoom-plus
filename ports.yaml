@@ -1,0 +1,808 @@
+# sdl-dos-ports candidate backlog and status tracker.
+#
+# Each port lives in its own git repository. This file is the queue: a
+# candidate starts at dos_status BACKLOG with no port_repo_url. Claiming a
+# candidate means running scripts/new-port.sh, which scaffolds the new
+# port's repo (wired to this repo's shared/ via git submodule), and then
+# updating that candidate's entry here (dos_status -> RESEARCH,
+# port_repo_url set) in a commit to this repo.
+#
+# dos_status ladder:
+#   BACKLOG -> RESEARCH -> BLOCKED -> BOOTSTRAP -> COMPILES -> STARTS ->
+#   TITLE_SCREEN -> PLAYABLE -> FULL_GAME -> OPTIMIZING -> RELEASE_READY
+#
+# difficulty: 1 = trivial, 2 = easy, 3 = moderate, 4 = difficult,
+#             5 = major engine-port effort
+#
+# Never guess an upstream_url. If a candidate's upstream is not yet located,
+# leave upstream_url null and say so in notes -- locating and pinning the
+# canonical upstream revision is that candidate's literal first task.
+#
+# upstream_license / upstream_license_verified: same rule applies to
+# licensing as to upstream_url -- NEVER GUESS. upstream_license_verified is
+# only true once someone has actually read the upstream project's own
+# LICENSE/COPYING file (or equivalent) in the pinned revision and recorded
+# what it says. A "commonly believed to be X" recollection is not
+# verification -- leave upstream_license null and put the lead in notes
+# instead. We need this to be right because it governs what we are legally
+# allowed to distribute, modify, and how (see docs/licensing.md and
+# CLAUDE.md's "Never contribute upstream" section for the related policy on
+# not sending anything back to these upstreams).
+
+ports:
+  - name: doskutsu
+    upstream_url: https://github.com/nxengine/nxengine-evo
+    upstream_revision: 1f093d1423cc395eb199230cd609b806ef1daa36
+    upstream_license: GPL-3.0
+    upstream_license_verified: true
+    port_repo_url: https://github.com/ecliptik/doskutsu
+    language: C++
+    original_sdl_version: "2 (via nxengine-evo)"
+    target_sdl_version: "3"
+    graphics_api: software / VESA
+    dos_status: RELEASE_READY
+    priority: 0
+    difficulty: null
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: Pentium 75
+    maintainer: ecliptik
+    notes: >
+      Reference port. Cave Story via NXEngine-evo (GPLv3) on
+      SDL3/DJGPP/CWSDPMI. Source of the shared/ platform layer.
+      shared/ submodule adoption (plans/DOSKUTSU-MIGRATION-PLAN.md)
+      LANDED on doskutsu main, currently at 332d379 (pin bump from
+      f00dd84 to pick up the hub's shared/skills/; pushed to Forgejo
+      origin). Submodule (.sdl-dos-ports) pinned at sdl-dos-ports
+      006a02c75a3cd8279a735b34084fbd94cff99596. Steps 1-4 landed:
+      patches/SDL + patches/SDL_mixer symlinked into
+      shared/patches/sdl3-dos + sdl3-mixer, the 4 vendor scripts
+      symlinked into shared/scripts/, and the SDL3/mixer/image build
+      stages consumed via shared/build/sdl3-dos.mk. Build-correctness
+      verified: verify-patches-applied 114+2 patches exit 0 through
+      the symlinks, make all exit 0 (rebuilt binary byte-identical to
+      a from-scratch build on the same host), make smoke gate PASS,
+      and a real-hardware RUNMANIFEST run (g2k rig) confirmed
+      environment=realhw + build_sha12=04388290f735. Performance
+      confirmed separately post-migration: a real-hardware ABBA
+      reproduction of patch 0328's (BG blank-tile-skip) measured KPI
+      on the POD-83/Mach64/PicoGUS rig came back PASS, delta +3.15fps
+      vs. the pre-migration baseline of +3.0fps (threshold >=+2.0,
+      A-to-A spread 0.0) -- the submodule migration changed neither
+      build output nor measured performance. Steps 5-7 (tools/ DOSBox-X
+      confs, tests/probes, .claude/agents/ charters) deliberately left
+      doskutsu-local for now, per the plan's own recommendation --
+      keeping tools/ local sidesteps the DOSKUTSU_ENVIRONMENT vs.
+      DOS_PORT_ENVIRONMENT env-var mismatch rather than resolving it.
+      upstream_revision per vendor/sources.manifest in the doskutsu
+      repo as of this writing; re-check there for the current pin.
+      upstream_license verified directly against doskutsu's own
+      LICENSE file ("NOTE ON COMBINED BINARY" section) as of this
+      writing.
+
+  - name: adventure-game-studio
+    upstream_url: https://github.com/adventuregamestudio/ags
+    upstream_revision: 94e271df9c14484d89f4861100f643d39555dae7
+    upstream_license: Artistic License 2.0
+    upstream_license_verified: true
+    port_repo_url: https://forgejo.example.ts.net/ecliptik/dosags  # private; real host redacted
+    language: C++
+    original_sdl_version: "2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: PLAYABLE
+    priority: 1
+    difficulty: 5
+    dos_minimum_target: null
+    dos_recommended_target: null
+    maintainer: null
+    notes: >
+      Highest strategic value: one engine port potentially unlocks a large
+      catalog of games. Needs an explicit SDL2->SDL3 strategy decision
+      (direct port vs. compatibility shim) before kickoff -- see
+      plans/SDL_DOS_PORTING_PROGRAM.md section 18. First deliverables are
+      research-only (RESEARCH.md, SDL-SURFACE.md, DEPENDENCIES.md,
+      PLATFORM-SURFACE.md, LICENSE-REVIEW.md, PLAN.md). Port name chosen:
+      dosags (repo to be created at forgejo.example.ts.net/ecliptik/dosags).
+
+      2026-09-10: upstream_revision pinned to tag v3.6.3.13 (94e271df9),
+      the current tip of the actively-maintained `ags3` stable branch
+      (dated 2026-08-16) -- deliberately not the newer `ags4` line, which
+      has far less mileage and its own parallel version history; `ags3`
+      continues the long-established 3.x series the large majority of
+      existing AGS games target. upstream_license verified by reading
+      this revision's own License.txt + Copyright.txt directly: Artistic
+      License 2.0, original author Chris Jones, various contributors
+      2011-2026. Note: the AGSBlend plugin (Plugins/agsblend/) carries its
+      own separate license file -- irrelevant unless that plugin is ever
+      whitelisted in under the AGS-DOS compatibility profile.
+
+      Dependency shape at this pin (read from CMakeLists.txt): C++11
+      throughout, SDL2 + SDL2_sound required (fetched via CMake
+      FetchContent by default), Ogg + Vorbis + Theora all `REQUIRED` at
+      the CMake level. Theora already has a first-class
+      `AGS_NO_VIDEO_PLAYER` build option (matches the compatibility
+      profile's "Theora: unsupported initially" directly -- no patching
+      needed to strip it). Ogg/Vorbis have no equivalent toggle.
+
+      2026-09-10 (plan review) -- two earlier claims in this note were
+      wrong and are corrected here rather than silently dropped. (1) It
+      said DJGPP "needs its own hand-written Makefile regardless, per
+      doskutsu precedent": that predates shared/build/sdl3-dos.mk, whose
+      own header is designed for a port's Makefile to wrap the engine's
+      CMake via the SDL DJGPP toolchain file. Decision for dosags: patch
+      AGS's own CMake and drive it that way -- the first CMake-based
+      engine in this hub. (2) It said Allegro is "not a real external
+      dependency": there IS a real link target (`add_subdirectory(libsrc/
+      allegro)` -> `Allegro::Allegro`, linked by both Engine and Common),
+      a headless ~2k-line blit/palette/math/packfile subset of Allegro
+      4.4.3 with no OS-integration code and no license file anywhere in
+      the tree. Full detail, the patch sequence, and the DJGPP probe
+      results live in the dosags repo (PLAN.md, DEPENDENCIES.md,
+      PATCH-SEQUENCE.md, tests/probes/djgpp-runtime/).
+
+      2026-09-10: COMPILES reached -- patches/ags/0001-0036 land the full
+      minimum patch sequence (CMake/platform-macro gates, DJGPP runtime
+      shims, the SDL2->SDL3 engine-source port, the ali3dsw.cpp
+      window-surface rewrite replacing the old 32-bit-only SDL_Renderer
+      path, and the DOS platform driver), confirmed by a clean-slate
+      `make configure-ags` + full build + link producing a real
+      ags.exe (MS-DOS/DJGPP go32 executable), not inferred from the
+      absence of remaining compile errors. Full detail in the dosags
+      repo's PLAN.md/PATCH-SEQUENCE.md.
+
+      2026-09-10 (fourth session): STARTS reached -- ags.exe boots under
+      DOSBox-X, SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)
+      succeeds, and the engine exits cleanly (real DOS exit code 0)
+      through its own normal quit() path. No game package exists yet, so
+      this run takes AGS's documented no-game-data path rather than
+      reaching a graphical window -- that already satisfies this
+      milestone's own "SDL3 initializes, exits cleanly" definition. Two
+      non-blocking findings surfaced along the way, full detail in the
+      dosags repo's PLAN.md: a DOSBox-X-shell tooling gotcha
+      (`dosbox-run.sh --merge-stderr` corrupts the invoked program's argv,
+      not just output merging -- never pass it to this engine) and a
+      cosmetic doubled-drive-prefix bug in `Directory::
+      GetCurrentDirectory()`'s output under this DJGPP/DOSBox-X
+      combination, worth a real probe before the "Game package parses"
+      milestone.
+
+      2026-09-10 (fifth session): TITLE_SCREEN reached -- a minimal
+      hand-built synthetic .ags game package (not the real first test
+      game) gets ags.exe past engine_init_gamedata()/InitGameState() and
+      into graphics-mode setup for the first time: a real window surface
+      opens, clears, and presents, confirmed by real DOSBox-X
+      video-capture screenshots at both SDL_PIXELFORMAT_INDEX8 (8-bit)
+      and SDL_PIXELFORMAT_RGB565 (16-bit), 640x480 fullscreen desktop.
+      The "cosmetic" doubled-drive-prefix bug flagged above turned out to
+      be real and load-bearing: root-caused to vendored Allegro's
+      canonicalize_filename() losing DOS drive-letter handling under this
+      port's DJGPP/ALLEGRO_UNIX branch, which would have corrupted a
+      successfully-resolved game-data path, not just the no-game-data
+      error text -- fixed as patch 0037. Also found and fixed a real,
+      subtle bug in the fixture-building work itself (an easy-to-miss
+      unconditional trailing field in AGS's own
+      read_interaction_scripts(), causing a silent out-of-bounds crash)
+      after an extensive isolated-probe campaign ruled out DJGPP/
+      toolchain explanations first. Full detail in the dosags repo's
+      PLAN.md/README.md. RUNMANIFEST wiring and a cache-size-defaults
+      patch are explicitly deferred to next session. Next milestone:
+      "Game package parses, reaches initial room setup", needs the real
+      hand-authored first test game and a real sprite file -- not yet
+      attempted.
+
+      2026-09-10 (sixth session): RUNMANIFEST wired (patch 0038) at
+      quit()'s clean-shutdown path, confirmed by a real DOSBox-X run
+      producing a genuine RUNMANIFEST-BEGIN/END block (environment=
+      dosbox-x, a real non-zero env_block_sha, real started_utc/
+      duration_s, exit_code=0) against the TITLE_SCREEN fixture -- not
+      inferred. dos_status stays TITLE_SCREEN; this isn't its own rung on
+      the ladder. Landing it surfaced a real macro collision between
+      vendored Allegro's alconfig.h (unconditional, unguarded
+      _farsetsel/_farnspokeb/etc DOS-backend macros) and DJGPP's own real
+      <sys/farptr.h> (pulled in by RUNMANIFEST's 86Box-detection code),
+      fixed by an include-order change. Also landed the previously-
+      deferred cache-size-defaults patch (0039): sprite/sound cache
+      ceilings dropped from their desktop-scale defaults (128 MB / 32 MB)
+      to a conservative DOS starting point (4 MB / 2 MB) -- not a crash
+      fix, SetMaxCacheSize() only sets a limit, but worth landing before
+      real sprites load for the first time. Full detail in the dosags
+      repo's PLAN.md/PATCH-SEQUENCE.md/README.md. Next milestone unchanged
+      from above: "Game package parses, reaches initial room setup" still
+      needs the real hand-authored first test game -- scoping research for
+      that is in progress, not yet landed as a decision.
+
+      2026-09-10 (seventh session): patch 0040 (binary_sha12 build
+      fingerprint) landed, closing patch 0038's own deferred follow-up --
+      confirmed by a real DOSBox-X run producing a genuine 12-hex value in
+      RUNMANI.LOG. The 320x200 resolution path (previously flagged as a
+      real open wrinkle for the eventual first test game) is characterized
+      and resolved: both real display paths render correctly via the
+      vendored SDL DOS backend's own classic VGA Mode 13h support, no VESA
+      mode needed. No freeware/open-source AGS game was found usable for
+      testing or committing (reconfirms prior research). Separately, a
+      time-boxed Wine investigation found a real, working, non-interactive
+      AGS compile pipeline (wine + winetricks dotnet46 + xvfb-run +
+      AGSEditor.exe /compile) -- materially more encouraging than prior
+      literature suggested. A real 8-bit package compiled this way, run
+      against this port's own ags.exe under DOSBox-X, reached
+      Initialize sprites succeeding for the first time ever against a
+      real (non-synthetic) package, then Starting game/Initialize path
+      finder -- independently cross-checked against AGS's own official
+      Linux engine build (same log stopping point, same rendered frame,
+      confirmed by screenshot). dos_status stays TITLE_SCREEN; this
+      session's own instructions deliberately did not change it despite
+      the strength of this evidence -- a future session should decide
+      what it means for the milestone ladder, and whether the Editor's
+      interactive GUI (not just non-interactive compile) is also viable
+      under Wine, which would remove the Windows-VM dependency for
+      authoring the real first test game entirely. Everything from the
+      Wine investigation lives outside version control (the dev machine's
+      /tmp); nothing was committed as a result. Full detail in the dosags
+      repo's PLAN.md.
+
+      2026-09-10 (eighth session): the interactive AGS Editor GUI was
+      confirmed to genuinely render under Wine+Xvfb (real menu bar,
+      toolbar, a real modal dialog dismissed via xdotool) -- further than
+      the seventh session's non-interactive-only test, but the full
+      authoring workflow (room designer, sprite/font/audio import) was not
+      exercised. Mid-session the operator redirected the work: licensing
+      only blocks committing a game, not using one for local engine
+      testing that never gets committed -- so the session fetched the
+      official adventuregamestudio/ags-demo-game (AGSQuest, CC BY-NC-ND
+      art, local-testing-only, never committed) and recompiled it at
+      16-bit HighColor (its rooms are natively hi-color; an 8-bit Palette
+      attempt compiled but silently broke all 4 rooms -- a room's color
+      depth is baked in per-.crm file, independent of the project
+      setting). Run against this port's own ags.exe under DOSBox-X, the
+      engine reached the same stopping point as AGS's own official Linux
+      reference engine, and clicking through to the game's actual first
+      room rendered real background art, a player-character sprite, and a
+      working cursor for the first time ever on this port -- not the
+      flat-color placeholder every prior real-package result had
+      produced. No patches landed; nothing committed. Full detail in the
+      dosags repo's PLAN.md (eighth-session "Current state").
+
+      2026-09-10 (eighth session, follow-up, same sitting): the operator
+      reviewed the write-up above and explicitly confirmed it satisfies
+      dosags's own "Game package parses, reaches initial room setup"
+      milestone checkbox (PLAN.md), with the real limitations (off-the-
+      shelf, unlicensed, local-testing-only package) stated on that line.
+      dos_status stays TITLE_SCREEN -- the hub's dos_status ladder has no
+      intermediate rung between TITLE_SCREEN and PLAYABLE for this
+      checkbox, so the hub-visible status doesn't move again until
+      PLAYABLE itself, even though dosags's own finer-grained milestone
+      list has advanced. The operator also decided: keep pushing on Wine
+      GUI authoring (not a Windows VM) for the eventual licensed test-game
+      deliverable, and keep using off-the-shelf local-testing-only
+      packages as the default way to exercise the engine going forward
+      regardless of how that resolves.
+
+      2026-09-10 (eighth session, later the same day): a standing test
+      harness around AGS Quest is now planned in dosags's PLAN.md ("Test
+      harness (AGS Quest)") -- an autopilot scripted inside AGS itself
+      (System.Log to stdout, RunInteraction/Button.Click, SaveGameSlot/
+      RestoreGameSlot, SaveScreenShot, QuitGame), a reproducible Wine
+      package build from a pinned upstream SHA (art never committed;
+      screenshot hashes only), an overlay adding our own WAV/MIDI/TTF so
+      the port's real audio and TTF paths are covered, and engine-side
+      instrumentation patches (fps p50/p95 into RUNMANIFEST, ms
+      timestamps, DPMI memory, run-identity env vars). AGS Quest
+      (640x360x16) is the stress/coverage workload; the fps KPI floor
+      stays tied to an in-profile package. HUB PREREQUISITE decided by
+      the operator: generalize shared/'s doskutsu-hardcoded
+      vcctrl-sweep/cell/collect scripts (C:\DOSKUTSU\LOGS, DOSKUTSU_*
+      env names -> profile-driven) BEFORE dosags's first rig run, so the
+      rig flow is port-agnostic rather than a second one-off. First rig
+      tier for dosags: HW-486-66.
+
+      2026-09-11 (ninth session): the AGS Quest test harness planned
+      above is now real -- slices 1-3 of its own 7-slice work order
+      landed and committed. tests/harness/ is a reproducible pipeline
+      (setup-wine.sh -> build-package.sh -> run-dosbox.sh ->
+      parse-results.py); a full AutoPilot.ash/.asc module drives the
+      package through all 16 named phases (boot..quit) entirely via AGS
+      script; four new engine patches (patches/ags/0041-0044) fill
+      RUNMANIFEST's fps p50/p95, real ms room-transition timestamps,
+      DPMI free-memory tracking, and the run-identity env vars
+      (DOSAGS_LOG_TAG/DOSAGS_SCENE/DOSAGS_TAS_AUTO_EXIT_TICK), each
+      confirmed by a real DOSBox-X run producing real numbers. Two real
+      engine-behavior findings not anticipated by the eighth session's
+      own research: Hotspot/Object.RunInteraction() is itself deferred
+      (queued, not synchronous), and player.ActiveInventory must stay
+      set until the deferred interaction reading it has actually run --
+      see dosags's PATCH-SEQUENCE.md "Phase I" section and PLAN.md's
+      ninth-session write-up for the full mechanism.
+
+      2026-09-11 (ninth session, continued): slice 4 (overlay assets)
+      landed too, after the operator opted to push what was done so far
+      and answered a few clarifying questions (self-generate WAV/MIDI,
+      let the session pick the OFL font, keep going in the same
+      session). Self-generated CC0 WAV chime + MIDI tune (no external
+      tools/samples) plus "Press Start 2P", a real OFL TrueType font
+      pinned at a verified google/fonts commit (OFL.txt read directly,
+      not assumed). The two unknowns that blocked slice 4 earlier were
+      resolved by reading the AGS Editor's own C# source directly: fonts
+      are packaged by a plain filename glob (agsfnt<ID>.ttf in the
+      project root) regardless of Game.agf's own SourceFilename field;
+      audio clips are packaged from AudioCache/au<Index:hex6><ext>,
+      keyed by each clip's own stable "Fixed Index" (explaining the
+      existing package's index gap starting at 12, not a bug). Confirmed
+      by a real DOSBox-X run: package compiles, all 16 phases stay
+      green, and a real room-3 screenshot shows the intro cutscene's own
+      dialogue rendered in the new font's distinct pixel glyphs (not
+      committed, per this package's NC-ND art rule).
+
+      2026-09-11 (ninth session, continued once more): slice 5
+      (screenshots + hash regression + first results/ record) landed
+      too, closing out the ENTIRE local-DOSBox-X portion of the
+      harness's 7-slice work order (slices 1-5 all done). Three inline
+      SaveScreenShot() calls, one per meaningful phase transition
+      (settle/room3, interior/room4, gem-balcony/room3) -- confirmed
+      byte-identical (same sha256) across three independent DOSBox-X
+      runs before being committed as the expected/ baseline, and each
+      image visually inspected first. First results/
+      dosbox-x-2026-09-11-agsquest.{md,json} record committed,
+      correctness-only. Slice 6 (hub vcctrl-sweep/-cell/-collect
+      generalization + first real-hardware run) is next -- its own real
+      piece of work, not attempted this session. dos_status unchanged
+      (TITLE_SCREEN) -- the hub's ladder has no rung for test-harness
+      progress specifically; it will advance again at PLAYABLE.
+
+      2026-09-11 (tenth session): slice 6 landed -- the hub's own
+      vcctrl-sweep/-cell/-collect and path-touching bin/vcctrl-* tools
+      (in the sibling vcctrl repo) were generalized to read a profile
+      instead of hardcoding doskutsu (see this hub's own
+      docs/hardware-testing.md for the full writeup; profiles/
+      doskutsu.yaml filled in with its real values, profiles/
+      dosags.yaml with explicit nulls for what dosags doesn't have yet).
+      Then dosags's actual first real-hardware run: HW-486-66 (Intel
+      486DX2 ~66MHz, ATI Mach64), tag HW1, via vcctrl's generic
+      stage-file/send-file/get-file primitives with a purpose-built
+      RUN.BAT (not vcctrl-cell directly -- AGS.EXE's real CLI-args
+      invocation doesn't fit vcctrl-cell's env-var+CFG-file model built
+      for doskutsu). Result: all 16 AutoPilot phases ok, exit_code=0,
+      first-ever real-hardware fps datum for this port
+      (fps_p50=9.62/fps_p95=10.09 on AGS Quest's stress workload, not
+      the in-profile KPI floor), and all three screenshots
+      byte-identical to the existing DOSBox-X baseline. A real harness
+      gap was found and fixed (a RUN.BAT that doesn't restore the
+      console's video mode after AGS.EXE exits reads as a hang on
+      vcctrl's capture for several minutes after a run has actually
+      finished cleanly). dosags's own "First room renders" milestone is
+      now formally claimed (both its DOSBox-X and real-hardware gate
+      halves done). dos_status unchanged (TITLE_SCREEN) -- still no
+      ladder rung between TITLE_SCREEN and PLAYABLE for this milestone.
+      Full writeup: dosags's PLAN.md tenth-session "Current state" and
+      tests/harness/results/HW-486-66-2026-09-11-agsquest.md.
+
+      2026-09-11 (eleventh session): slice 7 landed -- the dialog phase
+      + input-latency approximation, both optional/non-gating (neither
+      affects dos_status, unchanged at TITLE_SCREEN). The original
+      design (dRedMage.Start() then a coordinate click) turned out
+      unusable: Dialog.Start() is itself deferred when called from
+      script, and its own intro text drains any pre-queued click before
+      the options screen exists, among other real engine facts found
+      along the way (see dosags's PLAN.md Measured Constants table,
+      2026-09-11 rows, for the full chain). Final design uses
+      Dialog.DisplayOptions() (genuinely synchronous) instead, with
+      "Leave"'s own screen coordinates read off a live DOSBox-X capture
+      rather than computed. patches/ags/0045 (/sdldos:review'ed) adds
+      paired inject/processed uclock() timestamps around the simulated
+      click, real deltas 11-24ms across several runs. dialog is a new
+      optional phase in the harness's own parse-results.py -- shown in
+      the rendered record, never gates pass/fail. Confirmed by several
+      real, reproducible DOSBox-X runs, then (same session) by a real
+      real-hardware run on HW-486-66 (tag HW8): same chosen=14 result,
+      plus the first real-hardware input-latency datum for this port
+      (223ms, vs. DOSBox-X's own 11-24ms). Getting a clean real-hardware
+      run surfaced three bugs in dosags's own run-rig.sh (fixed) and
+      several unrelated pre-existing bugs on the shared vcctrl rig
+      (fixed by vcctrl, not a dosags/AGS defect). Full writeup: dosags's
+      PLAN.md eleventh-session "Current state" and tests/harness/
+      results/HW-486-66-2026-09-11-agsquest-slice7.md.
+
+      2026-09-11 (twelfth session): dos_status advances to PLAYABLE,
+      operator sign-off. The eleventh session's own flagged "Open
+      question" -- whether the harness's full-green phase list actually
+      satisfied PLAYABLE's own Milestone mapping, or just looked green --
+      turned out to have two real gaps, not just phrasing ambiguity: GUI
+      coverage was a single title-screen button click, and animation was
+      exercised nowhere at all (zero hits grepping the autopilot overlay
+      for Animate/SetView/.Loop/.Frame). Slice 8 closed both for real:
+      guimenu clicks the actual in-game-menu button a player uses;
+      anim samples room 4's own always-running chandelier object's Frame
+      across a poll window, proving genuine frame advancement rather
+      than trusting an Animating flag alone. Both landed as required
+      (non-optional) phases, confirmed on DOSBox-X with zero regression,
+      then confirmed again on HW-486-66 (tag HW10, first attempt, after
+      a real vcctrl-daemon fix -- a boot-menu keystroke-retry bug's
+      early-stop was watching the wrong signal, not a dosags/AGS defect).
+      dialog stays its own deliberately-optional item, confirmed (via
+      git log -S on the Milestone mapping's own wording) to be original
+      intent from the very first planning commit, not stale text. Same
+      session, run-rig.sh's post-launch wait was also changed from an
+      unconditional sleep for the full --timeout to a poll for the
+      screen actually going static, cutting real wasted time on a
+      normal successful run. Full writeup: dosags's PLAN.md
+      twelfth-session "Current state" and tests/harness/results/
+      HW-486-66-2026-09-11-agsquest-slice8.md.
+      2026-09-16: local-only prep session (no rig). The fixed timestep
+      (patches 0046-0048, opt-in DOSAGS_FIXED_TIMESTEP=1 by operator
+      decision) is now enforced by default in tools/port-game's
+      validate/check and in run-rig.sh, witnessed from the engine's own
+      "DOS-PORT fixed-timestep: ENABLED" log line, with tick_rate/
+      frames_skipped parsed into every record; patch 0077 extends the
+      RUNMANIFEST env allowlist so the benchmark env vars (fixed
+      timestep, forced depth, auto-exit tick, MIDI backend, GUS
+      autoinc/diag) change env_block_sha. Game porting framework gate
+      set decided: Trilby's Notes, 5 Days a Stranger, Maniac Mansion
+      Deluxe (in-profile) + Shards of God, IOAWN4T (32-bit); both 32-bit
+      references now validate from their manifests alone on DOSBox-X,
+      and a `check` subcommand lets a run-rig.sh collected dir enter the
+      record through the tool. The 2026-09-12 "black boxes around
+      sprites" report was root-caused on DOSBox-X as harness package
+      DATA -- the AGS Editor drops PNG alpha when the TrueColor-authored
+      AGS Quest is recompiled at HighColor, and the PNGs are RGB-black
+      under alpha 0; AGS's official Linux engine renders sha256-identical
+      frames -- so it is neither a dosags nor a shared-layer bug (no
+      SDL_ConvertSurface/colorkey on the sprite path at all); the fix is
+      a pre-compile alpha flatten in the harness build. Allegro 4.4.3's
+      license verified as giftware against upstream's own text at tag
+      4.4.3 (LICENSE-REVIEW.md blocker closed; built-in plugins are
+      compiled out). Plans written in dosags PLAN.md: framework
+      completion (F1-F5), the self-authored TAS-driven benchmark test
+      game (Linux-native pipeline from AGS's own agscc/agf2dta/
+      spritepak/crmpak/agspak, all verified building natively from the
+      pinned tree; one own tool, mkroom, for room data; CC0 assets +
+      MIT scripts), and the glitch fix/test plan. STATUS.md rewritten
+      to match current state.
+      2026-09-17: dos_status unchanged (PLAYABLE). Since the prep
+      session: Game porting framework claimed (F1-F5; 5 Days a Stranger
+      and Maniac Mansion Deluxe sourced -- MMD from a named Internet
+      Archive mirror by operator decision, its developer site is dead --
+      and all three in-profile games have HW-486-66 records through
+      `check`/`record`); Compatibility sweep claimed on six games (7 Days
+      a Skeptic replaced King's Quest III, whose only download is
+      itch.io's session-gated flow): boots + title PASS on all six,
+      playable/complete recorded honestly as not attempted (closed
+      binaries, no input automation). Performance: a diagnostic chain
+      (patches 0077-0086) accounted for 99.1% of Trilby's Notes' per-tick
+      cost and found Present()'s scaled blit had never been bracketed;
+      four pre-registered ABBA wins (0087 integer fast blit, 0090 word
+      store, 0091 skip-unchanged present, 0092 word-sized frame compare)
+      took fps_p50 5.0 -> 34.6 on HW-486-66 -- a STATIC-SCREEN figure
+      (23 of 881 presents real; a real full present still costs ~76 ms on
+      the 640x480 2x path). Operator opened the "40/40 plan" (dosags
+      PLAN.md): gates = idle 8-bit, moving content, and AGS Quest 16-bit
+      at 40Hz AND 40fps, both steady-state and whole-run tick rates must
+      pass. Findings so far that matter hub-wide, all folded into docs/:
+      std::chrono clock reads cost 1.3 ms each on the DX2-66 and any
+      positive sleep ~55 ms (timing.md); with TZ unset DJGPP's libc can
+      land in a broken zone state on a machine with no DJGPP install --
+      ~42 ms clock reads and 2059-2071 run dates, an A/B confound across
+      ~20 earlier cells (fix: set TZ at startup; re-measurement of the
+      affected conclusions is listed in dosags PLAN.md); on the Mach64
+      the rendering phase follows doskutsu's unscaled presentation
+      (Mode 13h / centered in 512x384 / centered in 640x480, to be proven
+      on the machine; video.md); a running SDL3-DOS program cannot be
+      liveness-probed through the keyboard, and the post-FTP keyboard
+      hang needs self-recovering scripts (hardware-testing.md,
+      dos-rig-operations). Workflow captured as the benchmark skill's
+      self-driving loop reference.
+
+  - name: vvvvvv
+    upstream_url: https://github.com/TerryCavanagh/VVVVVV
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C++
+    original_sdl_version: "2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 2
+    difficulty: 3
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      Flagship recognizable 2010 indie port. Licensing/distribution terms
+      for source and assets must be reviewed (LICENSE-REVIEW.md) before any
+      release packaging automation is built -- per
+      plans/SDL_DOS_PORTING_PROGRAM.md section 7, VVVVVV's source has
+      historically been distributed under source-available terms that are
+      NOT automatically redistribution rights; do not assume "source
+      available" means "freely redistributable" until the actual license
+      terms are read and recorded here. Music decode cost likely exceeds
+      render cost on a 486 -- plan a hardware-MIDI fallback.
+
+  - name: meritous
+    upstream_url: null
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 3
+    difficulty: 2
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      Recommended first "second game" port -- proves the shared/ platform
+      and repeatable pattern with minimal engineering. Procedural
+      dungeon-crawler, small resolution, plain C. Locate canonical upstream
+      repo before starting.
+
+  - name: openjazz
+    upstream_url: https://github.com/OSSGames/GAME-SDL-openjazz
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C
+    original_sdl_version: "2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 4
+    difficulty: 3
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      Native 320x200. An open SDL recreation of a game that originally ran
+      on DOS, going back to DOS -- exercises 320x200 video behavior
+      separately from doskutsu's 320x240 target. Asset licensing must be
+      documented separately from the open engine.
+
+  - name: powder
+    upstream_url: null
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 5
+    difficulty: 2
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: 486DX2-66
+    maintainer: null
+    notes: >
+      Low-risk confidence builder. Graphical roguelike, turn-based/low-
+      frequency simulation, small sprite workload. Good test of keyboard
+      input, save handling, and non-platformer graphics. Locate canonical
+      upstream repo before starting -- confirm source availability and
+      license terms as part of that search; unverified recollection is
+      that POWDER's source has not always been openly licensed, which
+      would block this candidate entirely if source access/modification
+      rights don't actually exist. Do not proceed past research until this
+      is confirmed one way or the other.
+
+  - name: kobo-deluxe
+    upstream_url: null
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C++
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 6
+    difficulty: 3.5
+    dos_minimum_target: Pentium 75
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      Renderer stress test, not a first port. Fast multidirectional
+      shooter with heavy sprite/particle/scrolling load. Use an older
+      pre-OpenGL-era revision. Locate canonical upstream repo before
+      starting.
+
+  - name: blob-wars
+    upstream_url: null
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 7
+    difficulty: 3.5
+    dos_minimum_target: Pentium 75
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      Closest workload to doskutsu/Cave Story of the candidates: full
+      action/platformer, scrolling, multiple levels. Watch SDL_ttf and
+      archive-format overhead. Target older SDL 1.x-era revisions before
+      modernized branches. Locate canonical upstream repo before starting.
+
+  - name: passage
+    upstream_url: https://github.com/jasonrohrer/Passage
+    upstream_revision: 2f713f261dc907f6feda106ebbee0464eeab791d
+    upstream_license: public domain
+    upstream_license_verified: true
+    port_repo_url: https://github.com/ecliptik/dossage
+    language: C
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: OPTIMIZING
+    # 2026-09-05: full 3-card x 4-CPU real-hardware matrix (Mach64, ViRGE,
+    # Cirrus x 486DX2-50, 486DX2-66, Am5x86-133, Pentium OverDrive 83 --
+    # twelve pairings) CLOSED, 12/12 PASS against the 14.90fps KPI line,
+    # on the merged dx2-50-15fps fix build (build_sha12=a5e9835f12e7).
+    # Superseded the 2026-08-31 single-point figure below and resolved
+    # that entry's open Mach64-vs-current-build question -- all twelve
+    # cells, Mach64 included, now run the same current build. gallery/
+    # dossage/ entry added same day. Still not RELEASE_READY: no
+    # release/dist packaging step yet. See gallery/dossage/README.md and
+    # dossage's own docs/BENCHMARK-PLAN.md for the full campaign.
+    #
+    # 2026-08-31 (superseded above): real-hardware validated end to end on
+    # 486DX2-66/PicoGUS/Cirrus CL-GD5430 (14.94fps, up from 13.992, KPI
+    # campaign closed honestly short of a 15.000 target). Kept for
+    # history; see the 2026-09-05 note above for current status.
+    priority: 8
+    difficulty: 1
+    dos_minimum_target: 486DX2-50
+    dos_recommended_target: 486DX2-50
+    maintainer: ecliptik
+    notes: >
+      Port repo is "dossage" (portmanteau, matches doskutsu's DOS+game
+      naming convention; binary DOSSAGE.EXE). Tiny reference/skeleton port
+      covering init/video/keyboard/timer/audio/filesystem/shutdown
+      end-to-end -- intended to become the copy-paste starting skeleton in
+      templates/ once ported. upstream_url/upstream_revision verified by
+      cloning jasonrohrer/Passage directly (author's own GitHub account;
+      only 2 commits, "Exported latest revision from sourceforge cvs" --
+      this is the actual upstream, not a fork or mirror).
+      upstream_license verified against the author's own project page
+      (https://hcsoftware.sourceforge.net/passage/), which states
+      "Placed in the public domain" -- no LICENSE file ships in the source
+      tree itself, so the project homepage is the recorded verification
+      source (quoted, with URL, in dossage's own LICENSE-REVIEW.md).
+      Build dependency: Jason Rohrer's own minorGems utility library
+      (https://github.com/jasonrohrer/minorGems), also public domain
+      (verified via its own in-repo no_copyright.txt, dated 2018 -- an
+      actual file in the pinned tree, stronger verification than
+      Passage's own). Only a small subset of minorGems is used (file/path,
+      string, settings, time, thread, sha1, TGA image decode, simple
+      vector) -- the rest of that large multi-project library (portaudio,
+      miniupnpc, network/p2p code, etc.) is irrelevant here and should not
+      be vendored/built. Engine surface is unusually small even for
+      difficulty:1: raw SDL 1.2 only, no SDL_mixer (custom sample-level
+      software synth audio), no SDL_image (custom uncompressed .tga
+      decoder in minorGems), no font library (bitmap numerals). Only
+      Thread use is Thread::staticSleep() -- trivially compatible with the
+      SDL3-DOS cooperative-scheduler / threading-zero invariant doskutsu
+      established. Source-verified KPI: gameSource/game.cpp defines
+      `int lockedFrameRate = 15;` -- the original design targets 15 fps,
+      not Cave Story's 50 fps, so this port's KPI is ~15 fps sustained on
+      the 486DX2-50/486DX2-66 tier rather than doskutsu's 25-30 fps bar.
+      Unlike doskutsu, engine AND game assets are both public domain from
+      the same author, so (unlike Cave Story's freeware-not-redistributed
+      data) there is no legal blocker to shipping the assets in this repo
+      -- LICENSE-REVIEW.md still documents this properly rather than
+      skipping the paperwork because the answer is permissive.
+      2026-08-26: BOOTSTRAP -> PLAYABLE in one session. SDL 1.2 -> SDL3
+      migration (patches/passage/0001) plus DJGPP platform shims for
+      minorGems' Path/Time/Thread (patches/minorgems/0001) compiled and
+      linked clean on the first attempt after two small fixes (a DJGPP
+      branch for minorGems' endian.h, and defining
+      g_pixtone_active_count -- an engine-provided extern the shared
+      SDL3-DOS Sound Blaster backend requires regardless of engine).
+      Verified under DOSBox-X (build/stage, lfn=true pending an 8.3-
+      rename follow-up -- several of Passage's own asset filenames
+      exceed 8.3): title screen renders correctly and gameplay (maze
+      corridor, player sprite, treasure chests) is visibly correct and
+      responds to keyboard input. Full CPU/video/sound matrix sweep
+      (doskutsu's own matrix) planned once optimized, per operator
+      direction.
+      2026-08-26 (later same day): found + fixed a real bug (missing
+      SDL_INIT_AUDIO -- SDL3's SDL_OpenAudioDeviceStream doesn't
+      self-init the audio subsystem the way SDL1.2's SDL_OpenAudio did),
+      confirmed via temporary instrumentation that the synthesis math
+      produces sane non-zero PCM (real audibility deferred to real-HW --
+      DOSBox-X in this dev environment pre-buffers audio far ahead of
+      real-time under cycles=max and never conclusively demonstrated
+      playback). Completed the 8.3-rename follow-up
+      (patches/passage/0002): all asset/settings filenames renamed,
+      lfn flipped back to false, reverified. Attempted sdldos's
+      g_pixtone_active_count -> g_dos_sfx_synth_active_count rename +
+      submodule bump to 9e9c5a8, but that hub commit's SDL patch series
+      fails to apply against this port's pinned SDL SHA -- reported,
+      reverted, submodule held at bf10f15 pending a hub-side fix. Handed
+      off to vcctrl for this port's first real-hardware pass.
+      2026-09-05: the 486DX2-50 (this port's own minimum-target CPU) fix-
+      validation arc CLOSED on real hardware (branch dx2-50-15fps, merged
+      to main as 2881cfc) at 14.99fps average, and the follow-on 3-card x
+      4-CPU matrix (Mach64/ViRGE/Cirrus x 486DX2-50/486DX2-66/Am5x86-133/
+      Pentium OverDrive 83, twelve pairings) CLOSED clean: every cell
+      PASSes the 14.90fps KPI line on the merged build
+      (build_sha12=a5e9835f12e7), clustered 14.97-15.02fps -- expected,
+      since Passage's own pacer targets a fixed 15fps ceiling rather than
+      uncapped throughput, not a sign CPU/card choice doesn't matter. A
+      reproducible "one second over" effect (a 4475-frame life landing at
+      299s instead of 298s on some CPU/card pairings) does not reduce to
+      CPU tier, video path, or framebuffer size alone and never threatens
+      the KPI -- full characterization, including two overclaims about
+      its cause corrected mid-campaign, in dossage's own
+      docs/BENCHMARK-PLAN.md. This closes the 2026-08-31 note's open
+      Mach64-vs-current-build question (patch 0029's MAX_BPP change no
+      longer leaves Mach64 unverified against the current build) and adds
+      gallery/dossage/README.md. Remaining before RELEASE_READY: dist
+      packaging (binary + CWSDPMI + license texts) only.
+
+  - name: supertux-0.1.x
+    upstream_url: null
+    upstream_revision: null
+    upstream_license: null
+    upstream_license_verified: false
+    port_repo_url: null
+    language: C++
+    original_sdl_version: "1.2"
+    target_sdl_version: "3"
+    graphics_api: software
+    dos_status: BACKLOG
+    priority: 9
+    difficulty: 4
+    dos_minimum_target: Pentium 75
+    dos_recommended_target: Pentium 90
+    maintainer: null
+    notes: >
+      Pentium-class stretch target; a 486 port is a stretch goal, not the
+      first objective. Only investigate early Milestone-era 0.1.x releases
+      -- modern SuperTux carries a much heavier stack. 640x480 rendering
+      raises framebuffer bandwidth concerns. Locate canonical upstream repo
+      (and confirm which 0.1.x revision) before starting.
+
+  - name: psdoom-plus
+    upstream_url: https://github.com/id-Software/DOOM
+    upstream_revision: a77dfb96cb91780ca334d0d4cfd86957558007e0
+    upstream_license: GPL-2.0-or-later
+    upstream_license_verified: true
+    port_repo_url: null
+    language: C
+    original_sdl_version: "none (X11; psdoom-plus adds its own SDL3 layer)"
+    target_sdl_version: "3"
+    graphics_api: software / VGA mode 13h or VESA
+    dos_status: BACKLOG
+    priority: 10
+    difficulty: 3
+    dos_minimum_target: 486DX2-66
+    dos_recommended_target: Pentium 75
+    maintainer: null
+    notes: >
+      psDooM (processes as Doom monsters) on DOS: the "og" engine of
+      psdoom-plus, i.e. id Software's linuxdoom-1.10 with psdoom-plus's
+      own SDL3 video/audio layer (engines/og/platform/) and libpsd. The
+      DOS port lives INSIDE the psdoom-plus repo under dos/ (port root;
+      the hub subtree sits at the repo root's .sdl-dos-ports/), not in a
+      repo of its own, because the engine patches and libpsd are shared
+      with the Linux/BSD/Haiku builds. License verified by reading
+      LICENSE.TXT at the pinned SHA: GNU GPL version 2 text, with the
+      "any later version" option (1999 re-release; README.TXT: "Licensed
+      under the GNU General Public License 2.0"). The per-file headers
+      still name the older DOOM Source Code License; the GPL re-release
+      supersedes it. No SDL_mixer or SDL_image needed (linuxdoom has no
+      music; sound effects go through a raw SDL3 audio stream). Game
+      data: Freedoom (BSD-3-Clause) or the user's own IWAD. DOS has no
+      processes, so monsters come from the DOS memory chain (TSRs and
+      drivers, libpsd "mcb" backend) and from a remote psdoomd over TCP
+      (Watt-32, libpsd "net" backend).

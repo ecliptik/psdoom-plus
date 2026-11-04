@@ -1,0 +1,118 @@
+From ac45528d56f63a17f992873be5cc1452d88b7222 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 20:52:35 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0131 -- optional settle delay in
+ chunk-probe readback
+
+Adds SDL_HINT_DOS_BANK_CHUNK_PROBE_DELAY=<n>, an integer count of dummy
+inportb(0x80) I/O-delay reads (the same cheap technique already used
+elsewhere in this backend, e.g. patch 0076 -- not a calibrated
+microsecond timer) issued immediately before SDL/0129's post-write
+readback. Zero by default: no behavior change unless explicitly set.
+
+Motivated by a real-hardware Mach64 investigation (dossage/Passage):
+SDL/0129+0130 confirmed a write failure (always-zero readback) uniform
+across multiple banks and offsets, independent of which bank-switch
+mechanism was used -- but that reading, taken literally as "every banked
+write to this aperture fails 100% of the time," contradicts the actually
+-observed ~80%-correct rendering on the same hardware (most banks must
+be landing correctly, or nothing would render at all). Candidate
+resolution: a write-posting / read-after-write race specific to real
+bus/chipset timing, where dosmemput and the immediately-following
+dosmemget in the probe itself race ahead of the write actually
+committing to VRAM -- invisible to normal rendering (microseconds
+against a whole video frame) but potentially enough to make the probe's
+own back-to-back write-then-read see stale (zero) content. Impossible to
+test under DOSBox-X, which has no bus-timing model at all (writes there
+are logically instantaneous) -- this can only be resolved on real
+hardware, which is exactly what this lever is for.
+
+If a nonzero delay turns MISMATCH into MATCH, that confirms the
+apparent write failure was a probe-timing artifact, not a genuine
+defect, and points the investigation at what real rendering does
+differently (batches multiple chunks without ever reading them back).
+If it's still all-zero with delay, the "genuinely broken/inaccessible
+address" theory holds up better.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosframebuffer.c | 45 ++++++++++++++++++++++++++++--
+ 1 file changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index df4907fd0..f7440f435 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1168,6 +1168,30 @@ static int  g_bank_chunk_probe_emits_left = 64; /* rate-limit; a live probe
+                                                      session doesn't need
+                                                      more than this many
+                                                      lines to compare. */
++static int  g_bank_chunk_probe_delay = -1; /* -1 = unresolved */
++
++// SDL/0131: resolves SDL_HINT_DOS_BANK_CHUNK_PROBE_DELAY once (an integer
++// count of dummy inportb(0x80) I/O-delay reads; 0/unset = no delay, the
++// prior default behavior). See the call site in
++// dos_bank_chunk_probe_maybe_log() for what this tests.
++static int dos_bank_chunk_probe_delay_count(void)
++{
++    if (g_bank_chunk_probe_delay < 0) {
++        const char *h = SDL_GetHint("SDL_HINT_DOS_BANK_CHUNK_PROBE_DELAY");
++        long v = h ? SDL_strtol(h, NULL, 10) : 0;
++        if (v < 0) {
++            v = 0;
++        }
++        g_bank_chunk_probe_delay = (int)v;
++        if (g_bank_chunk_probe_delay > 0) {
++            dos_port_dbg_log(
++                "sdl: SDL/0131 BANK-CHUNK-PROBE-DELAY active: %d dummy "
++                "inportb(0x80) reads before each readback",
++                g_bank_chunk_probe_delay);
++        }
++    }
++    return g_bank_chunk_probe_delay;
++}
+ 
+ static void dos_bank_chunk_probe_resolve(void)
+ {
+@@ -1248,6 +1272,20 @@ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+     // by however far into this chunk the overlap starts.
+     Uint8 readback[DOS_BANK_CHUNK_PROBE_MAX_BYTES];
+     const Uint32 phys_addr = win_base + off_in_win + (ov_start - offset);
++    // SDL/0131: optional settle delay before the readback, gated behind
++    // SDL_HINT_DOS_BANK_CHUNK_PROBE_DELAY (an integer count of dummy
++    // inportb(0x80) reads -- the same I/O-delay technique already used
++    // elsewhere in this backend, e.g. patch 0076; NOT a calibrated
++    // microsecond timer, just a well-known cheap per-read stall). Tests
++    // whether a MISMATCH is a real write failure or a read-after-write
++    // race against a bus/chipset that posts writes to this aperture
++    // rather than committing them immediately -- something DOSBox-X's
++    // instantaneous memory model can never model either way, so this can
++    // only be resolved on real hardware. Zero by default: no behavior
++    // change unless explicitly requested.
++    for (i = 0; i < (Uint32)dos_bank_chunk_probe_delay_count(); i++) {
++        (void)inportb(0x80);
++    }
+     dosmemget(phys_addr, ov_len, readback);
+     int mismatch_at = -1;
+     for (i = 0; i < ov_len; i++) {
+@@ -1264,13 +1302,14 @@ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+ 
+     g_bank_chunk_probe_emits_left--;
+     dos_port_dbg_log(
+-        "sdl: SDL/0128+0129 BANK-CHUNK-PROBE offset=%lu..%lu (overlap "
++        "sdl: SDL/0128+0129+0131 BANK-CHUNK-PROBE offset=%lu..%lu (overlap "
+         "%lu..%lu) bank=%d off_in_win=%lu win_base=0x%08lx phys=0x%08lx "
+-        "src_bytes=[%s] readback=[%s] verdict=%s%s (%d emits left)",
++        "delay=%d src_bytes=[%s] readback=[%s] verdict=%s%s (%d emits left)",
+         (unsigned long)offset, (unsigned long)chunk_end,
+         (unsigned long)ov_start, (unsigned long)ov_end,
+         bank, (unsigned long)off_in_win, (unsigned long)win_base,
+-        (unsigned long)phys_addr, hex, rhex,
++        (unsigned long)phys_addr, dos_bank_chunk_probe_delay_count(),
++        hex, rhex,
+         (mismatch_at < 0) ? "MATCH" : "MISMATCH",
+         (mismatch_at < 0) ? "" : " (write did not land as sent)",
+         g_bank_chunk_probe_emits_left);
+-- 
+2.47.3
+
