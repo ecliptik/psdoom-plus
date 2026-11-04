@@ -1,6 +1,6 @@
 @ECHO OFF
 REM NETTEST.BAT - psdoom-plus shoots a remote `sleep` through psdoomd
-REM   NETTEST <iwad> <psdoomd-ip:port> [psdoom options]
+REM   NETTEST (iwad) (psdoomd-ip:port) [psdoom options]
 REM Needs the packet driver loaded, our address (PSDOOM_IP, or mTCP's MTCPCFG),
 REM and the token in PSD.CFG ("net_token = ...") or PSDOOM_NET_TOKEN.
 REM Writes NET.TXT (PSTEST line) and NETERR.TXT.

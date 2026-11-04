@@ -1,6 +1,6 @@
 @ECHO OFF
 REM SMOKE.BAT - psdoom-plus smoke test: start, play MAP01 for ~15 s, exit
-REM   SMOKE <iwad> [psdoom options] [command after the game]
+REM   SMOKE (iwad) [psdoom options] [command after the game]
 REM   e.g. SMOKE FREEDOOM.WAD -640 C:\VGACAP\MODE12.COM
 REM Writes SMOKE.TXT (the log; "I_InitGraphics: WxH N bpp" is the mode set),
 REM SMOKEERR.TXT (stderr), SMOKE.PPM (last frame); SDL3-DOS logs to LOGS\SDLDBG.LOG.
