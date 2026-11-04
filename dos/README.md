@@ -59,7 +59,7 @@ make                   # build/psdoom.exe, build/psdps.exe
 make cwsdpmi tests     # CWSDPMI r7 (sha256-pinned), the test TSRs
 make check             # tests/dosbox-pstest.sh in DOSBox-X
 make pktdrv bundle     # Crynwr NE2000.COM (tests only) and build/bundle/
-make dist              # build/psdoom-plus-<version>-dos.zip (README.TXT from dist/)
+make dist              # build/psdoom-plus-<version>-dos.zip (README.TXT from release/)
 ../tools/psdev test dos --vm debian   # PSDOOM.EXE in DOSBox-X in a test guest kills
                                       # that guest's sleeps through psdoomd
 ```
