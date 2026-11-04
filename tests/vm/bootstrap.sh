@@ -11,13 +11,18 @@ set -eu
 
 need() { command -v "$1" >/dev/null 2>&1; }
 want_engines=0
+want_zdoom=0            # GZDoom/UZDoom: C++, GL, a virtual X display
 [ "${1:-}" = "engines" ] && want_engines=1
+case "${2:-}" in gzdoom|uzdoom) want_zdoom=1 ;; esac
 
 have_all() {
 	need cmake && need cc || return 1
 	[ $want_engines -eq 0 ] && return 0
 	need pkg-config || need pkgconf || return 1
-	pkg-config --exists sdl3 sdl2 2>/dev/null
+	pkg-config --exists sdl3 sdl2 2>/dev/null || return 1
+	[ $want_zdoom -eq 0 ] && return 0
+	[ "$(uname -s)" = Haiku ] || need Xvfb || return 1
+	need git && need c++
 }
 
 if have_all; then
@@ -30,12 +35,14 @@ case $os in
 Linux)
 	pkgs="build-essential cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkg-config libsdl3-dev libsdl2-dev freedoom"
+	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx-dev libopenal-dev zlib1g-dev libbz2-dev libjpeg-dev xvfb libgl1-mesa-dri"
 	sudo apt-get update -qq
 	# shellcheck disable=SC2086
 	sudo apt-get install -y -qq $pkgs >/dev/null ;;
 FreeBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf sdl3 sdl2"
+	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx openal-soft xorg-vfbserver mesa-dri"
 	# shellcheck disable=SC2086
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
@@ -66,6 +73,7 @@ NetBSD)
 Haiku)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs libsdl3_devel libsdl2_devel"
+	[ $want_zdoom -eq 1 ] && pkgs="$pkgs libvpx_devel openal_devel"
 	# shellcheck disable=SC2086
 	pkgman install -y $pkgs ;;
 *)

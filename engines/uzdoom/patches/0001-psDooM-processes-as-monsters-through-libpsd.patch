@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 16:32:14 -0800
+Subject: [PATCH] psDooM: processes as monsters, through libpsd
+
+Hooks for the psdoom-plus ZScript and natives (engines/common/zdoom in
+the psdoom-plus tree; psdoom.zs is copied into wadsrc at configure time,
+since natives may only be declared in the engine's own resource):
+
+- zscript.txt: include zscript/psdoom.zs
+- doomcommon.txt: register PsdoomHandler
+- d_main.cpp: load psDooM's custom level (psdoom1/2.wad) with the
+  autoloads, unless -nopslev
+---
+ src/d_main.cpp                       | 6 ++++++
+ wadsrc/static/mapinfo/doomcommon.txt | 1 +
+ wadsrc/static/zscript.txt            | 1 +
+ 3 files changed, 8 insertions(+)
+
+diff --git a/src/d_main.cpp b/src/d_main.cpp
+index 1b8750c..0614f3f 100644
+--- a/src/d_main.cpp
++++ b/src/d_main.cpp
+@@ -2378,6 +2378,8 @@ static void D_DoomInit()
+ 	M_LoadDefaults ();			// load before initing other systems
+ }
+ 
++const char* PS_CustomLevel(const char* autoname);	// psdoom-plus: psdoom_zs.cpp
++
+ //==========================================================================
+ //
+ // AddAutoloadFiles
+@@ -2453,6 +2455,10 @@ static void AddAutoloadFiles(const char *autoname, std::vector<FileSys::Resource
+ 			lastpos = len;
+ 		}
+ 	}
++
++	// psdoom-plus: psDooM's custom process level (psdoom1/2.wad)
++	if (const char* pslevel = PS_CustomLevel(autoname))
++		D_AddFile(allwads, pslevel, true, -1, GameConfig, true);
+ }
+ 
+ //==========================================================================
+diff --git a/wadsrc/static/mapinfo/doomcommon.txt b/wadsrc/static/mapinfo/doomcommon.txt
+index 8efcfaa..dc73dfa 100644
+--- a/wadsrc/static/mapinfo/doomcommon.txt
++++ b/wadsrc/static/mapinfo/doomcommon.txt
+@@ -3,6 +3,7 @@ include "mapinfo/doomitems.txt"
+ 
+ gameinfo
+ {
++	AddEventHandlers = "PsdoomHandler"	// psdoom-plus
+ 	titlepage = "TITLEPIC"
+ 	creditpage = "CREDIT"
+ 	titlemusic = "$MUSIC_DM2TTL"
+diff --git a/wadsrc/static/zscript.txt b/wadsrc/static/zscript.txt
+index 4236464..2f281c4 100644
+--- a/wadsrc/static/zscript.txt
++++ b/wadsrc/static/zscript.txt
+@@ -39,6 +39,7 @@ version "5.0.0"
+ #include "zscript/mapdata.zs"
+ #include "zscript/constants.zs"
+ #include "zscript/events.zs"
++#include "zscript/psdoom.zs"	// psdoom-plus: processes as monsters
+ #include "zscript/destructible.zs"
+ #include "zscript/level_postprocessor.zs"
+ #include "zscript/level_compatibility.zs"

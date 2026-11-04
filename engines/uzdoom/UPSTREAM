@@ -1,0 +1,8 @@
+url=https://github.com/UZDoom/UZDoom.git
+commit=7910df7102033fd7754a317f3254f24101135926
+tag=5.0.3
+target=zdoom
+license=GPL-3.0 (LICENSE; branding and some wadsrc assets separately licensed)
+project=UZDoom
+cmake_include=common/zdoom/psdoom.cmake
+test_wrap=sh tests/vm/xwrap.sh

@@ -1,0 +1,8 @@
+url=https://github.com/ZDoom/gzdoom.git
+commit=99aa489d09015a95bb78df2b30ede29f328cc874
+tag=g4.14.2
+target=zdoom gzdoom_pk3 game_support_pk3 brightmaps_pk3 lights_pk3 game_widescreen_gfx_pk3
+project=GZDoom
+cmake_include=common/zdoom/psdoom.cmake
+test_wrap=sh tests/vm/xwrap.sh
+license=GPL-3.0 (LICENSE)

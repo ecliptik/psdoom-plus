@@ -98,7 +98,14 @@ cmd_fetch() {
 		[ "${2:-}" = "--force" ] || die "engines/$e/src exists (work in progress?); use --force to replace it"
 		rm -rf "$src"
 	fi
-	git clone -q "$(upstream "$e" url)" "$src"
+	if [ -n "$(upstream "$e" tag)" ]; then
+		# big histories (GZDoom/UZDoom): just the pinned release
+		git clone -q --depth 1 --branch "$(upstream "$e" tag)" "$(upstream "$e" url)" "$src"
+		[ "$(git -C "$src" rev-parse HEAD)" = "$(upstream "$e" commit)" ] ||
+			die "tag $(upstream "$e" tag) is not commit $(upstream "$e" commit) any more"
+	else
+		git clone -q "$(upstream "$e" url)" "$src"
+	fi
 	git -C "$src" checkout -q -b psdoom-plus "$(upstream "$e" commit)"
 	if ls "$ROOT/engines/$e/patches/"*.patch >/dev/null 2>&1; then
 		git -C "$src" -c user.name=psdev -c user.email=psdev@localhost \
@@ -120,13 +127,29 @@ cmd_export() {
 	ls "$ROOT/engines/$e/patches"
 }
 
+# cmake configure arguments for an engine: either our wrapper CMakeLists
+# (engines/<e>/CMakeLists.txt) or, for engines that must be the top-level
+# project (GZDoom/UZDoom), upstream with our include injected after project()
+configure_args() {  # engine rootdir
+	e=$1 r=$2
+	inc=$(upstream "$e" cmake_include)
+	if [ -n "$inc" ]; then
+		echo "-S $r/engines/$e/src -B $r/build/$e -DCMAKE_BUILD_TYPE=Release" \
+		     "-DPSDOOM_ENGINE=$e -DCMAKE_PROJECT_$(upstream "$e" project)_INCLUDE=$r/engines/$inc"
+	else
+		echo "-S $r/engines/$e -B $r/build/$e"
+	fi
+}
+
 cmd_build() {
 	[ $# -ge 1 ] || die "build needs an engine"
 	e=$1
 	engine_ok "$e"
 	[ -d "$ROOT/engines/$e/src" ] || cmd_fetch "$e"
-	cmake -S "$ROOT/engines/$e" -B "$ROOT/build/$e" >/dev/null
-	cmake --build "$ROOT/build/$e" --target "$(upstream "$e" target)" \
+	# shellcheck disable=SC2046
+	cmake $(configure_args "$e" "$ROOT") >/dev/null
+	# shellcheck disable=SC2046
+	cmake --build "$ROOT/build/$e" --target $(upstream "$e" target) \
 		-j "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 }
 
@@ -138,8 +161,8 @@ engine_vm() {
 	echo "== shipping tree to tv-$os"
 	ship_tree | ssh "tv-$os" 'rm -rf psdoom-plus && mkdir psdoom-plus && tar -xf - -C psdoom-plus'
 	echo "== bootstrap + build $e on tv-$os"
-	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/bootstrap.sh engines &&
-		cmake -S engines/$e -B build/$e >/dev/null &&
+	ssh "tv-$os" "cd psdoom-plus && sh tests/vm/bootstrap.sh engines $e &&
+		cmake $(configure_args "$e" '$HOME/psdoom-plus') >/dev/null &&
 		cmake --build build/$e --target $(upstream "$e" target) -j2 2>&1 | grep -E 'error|warning: implicit' ; test -x build/$e/psdoom-$e" ||
 		die "build failed on tv-$os"
 	iwad=$(ssh "tv-$os" 'for f in /usr/share/games/doom/freedoom1.wad /usr/local/share/games/doom/freedoom1.wad /usr/local/share/doom/freedoom1.wad "$HOME/freedoom1.wad"; do [ -r "$f" ] && echo "$f" && break; done; true')
@@ -149,7 +172,7 @@ engine_vm() {
 		iwad='$HOME/freedoom1.wad'      # expanded by the guest's shell
 	fi
 	echo "== $e end-to-end on tv-$os (real signals, inside the guest)"
-	ssh "tv-$os" "cd psdoom-plus && rm -rf tests/out && sh tests/vm/doom-pstest.sh build/$e/psdoom-$e \"$iwad\" tests/out"
+	ssh "tv-$os" "cd psdoom-plus && rm -rf tests/out && PSTEST_WRAP='$(upstream "$e" test_wrap)' sh tests/vm/doom-pstest.sh build/$e/psdoom-$e \"$iwad\" tests/out"
 	rc=$?
 	mkdir -p "$ROOT/tests/out/$os/$e"
 	scp -q "tv-$os:psdoom-plus/tests/out/*" "$ROOT/tests/out/$os/$e/" 2>/dev/null

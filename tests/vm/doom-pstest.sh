@@ -21,7 +21,13 @@ SLEEP=$(command -v sleep)
 # classic. (Not "sshd": in classic that glob could hit our own ssh session.)
 cp "$SLEEP" "$work/Xorg"
 
-export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+# PSTEST_WRAP runs the game under e.g. xvfb-run (GL engines can't use
+# SDL's dummy video driver)
+if [ -n "${PSTEST_WRAP:-}" ]; then
+	export SDL_AUDIODRIVER=dummy
+else
+	export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
+fi
 export HOME="$work/home" XDG_STATE_HOME="$work/state"
 mkdir -p "$HOME"
 # the game shows only our processes (non-root default); make it explicit
@@ -51,7 +57,8 @@ reap() {
 game() {
 	log=$OUT/$1.log
 	shift
-	"$BIN" -iwad "$IWAD" -warp 1 1 -nosound "$@" >"$log" 2>&1
+	# shellcheck disable=SC2086
+	${PSTEST_WRAP:-} "$BIN" -iwad "$IWAD" -warp 1 1 -nosound "$@" >"$log" 2>&1
 	grep '^PSTEST' "$log" || echo "  (no PSTEST line; see $log)"
 }
 
