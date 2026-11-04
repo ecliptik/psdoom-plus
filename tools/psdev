@@ -33,6 +33,9 @@ usage: $PROG <command> [args]
                                 (the guest gets a fresh copy of the tree and its deps)
   test <engine> --vm <os>       build an engine in a guest and shoot real processes there
                                 (tests/vm/doom-pstest.sh; results in tests/out/<os>/<engine>/)
+  test dos --vm <os>            PSDOOM.EXE (built here: make -C dos bundle) in DOSBox-X in a
+                                guest, shooting that guest's processes through psdoomd
+                                (tests/vm/dos-net-pstest.sh; results in tests/out/<os>/dos/)
 
 Real kill/renice runs only inside the test guests, never on a machine you use.
 EOF
@@ -202,6 +205,26 @@ unit_vm() {
 		cd build/libpsd && ctest --output-on-failure'
 }
 
+dos_vm() {
+	os=$1
+	vm_os_ok "$os"
+	make -s -C "$ROOT/dos" bundle >/dev/null || die "make -C dos bundle failed"
+	echo "== shipping tree and the DOS bundle to tv-$os"
+	ship_tree | ssh "tv-$os" 'rm -rf psdoom-plus && mkdir psdoom-plus && tar -xf - -C psdoom-plus'
+	(cd "$ROOT/dos/build" && tar -cf - bundle) | ssh "tv-$os" 'tar -xf - -C psdoom-plus'
+	echo "== bootstrap + build psdoomd on tv-$os"
+	ssh "tv-$os" 'cd psdoom-plus && sh tests/vm/bootstrap.sh dos &&
+		cmake -S libpsd -B build/libpsd -DPSD_BUILD_TESTS=OFF >/dev/null &&
+		cmake --build build/libpsd --target psdoomd 2>&1 | grep -E "error|warning"; test -x build/libpsd/psdoomd' ||
+		die "psdoomd build failed on tv-$os"
+	echo "== DOS end-to-end on tv-$os (real signals, inside the guest)"
+	ssh "tv-$os" 'cd psdoom-plus && rm -rf tests/out && sh tests/vm/dos-net-pstest.sh bundle build/libpsd/psdoomd /usr/share/games/doom/freedoom2.wad tests/out'
+	rc=$?
+	mkdir -p "$ROOT/tests/out/$os/dos"
+	scp -q "tv-$os:psdoom-plus/tests/out/*" "$ROOT/tests/out/$os/dos/" 2>/dev/null
+	return $rc
+}
+
 cmd_test() {
 	[ $# -ge 1 ] || die "test needs a target (unit)"
 	what=$1; shift
@@ -212,6 +235,10 @@ cmd_test() {
 		else
 			unit_local
 		fi ;;
+	dos)
+		[ $# -ge 2 ] && [ "$1" = "--vm" ] ||
+			die "test dos needs --vm <os>: it sends real signals"
+		dos_vm "$2" ;;
 	*)
 		[ $# -ge 2 ] && [ "$1" = "--vm" ] ||
 			die "test $what needs --vm <os>: it sends real signals"

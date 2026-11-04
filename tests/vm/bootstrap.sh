@@ -3,6 +3,7 @@
 #
 #   bootstrap.sh            toolchain + cmake (libpsd)
 #   bootstrap.sh engines    ... plus SDL3 and Freedoom (the engines)
+#   bootstrap.sh dos        ... plus DOSBox-X and Freedoom (psdoomd vs PSDOOM.EXE)
 #
 # Guests are reverted to a pristine install, so this runs (idempotently)
 # before every test session. Copyright (C) 2026 psdoom-plus contributors
@@ -14,7 +15,9 @@ want_engines=0
 want_zdoom=0            # GZDoom/UZDoom: C++, GL, a virtual X display
 want_woof=0             # Woof!: OpenAL, SDL3 >= 3.4 (built from git if older)
 want_dsda=0             # DSDA-Doom: SDL2_mixer, libsndfile, libzip, GL/GLU
+want_dos=0              # DOS: DOSBox-X runs PSDOOM.EXE against psdoomd
 [ "${1:-}" = "engines" ] && want_engines=1
+[ "${1:-}" = "dos" ] && want_dos=1
 case "${2:-}" in
 gzdoom|uzdoom) want_zdoom=1 ;;
 woof) want_woof=1 ;;
@@ -23,6 +26,9 @@ esac
 
 have_all() {
 	need cmake && need cc || return 1
+	if [ $want_dos -eq 1 ]; then
+		need dosbox-x && [ -r /usr/share/games/doom/freedoom2.wad ] || return 1
+	fi
 	[ $want_engines -eq 0 ] && return 0
 	need pkg-config || need pkgconf || return 1
 	pkg-config --exists sdl3 sdl2 2>/dev/null || return 1
@@ -52,6 +58,7 @@ Linux)
 	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx-dev libopenal-dev zlib1g-dev libbz2-dev libjpeg-dev xvfb libgl1-mesa-dri"
 	[ $want_woof -eq 1 ] && pkgs="$pkgs git libopenal-dev libasound2-dev"
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs libsdl2-mixer-dev libsndfile1-dev libzip-dev zlib1g-dev libgl-dev libglu1-mesa-dev"
+	[ $want_dos -eq 1 ] && pkgs="$pkgs dosbox-x freedoom"
 	sudo apt-get update -qq
 	# shellcheck disable=SC2086
 	sudo apt-get install -y -qq $pkgs >/dev/null ;;

@@ -336,9 +336,20 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
      what a modern psdoomd protects (refusals are audited on the host). Clients: `-psnet HOST:PORT`
      + `$PSDOOM_NET_TOKEN` (or `net`/`net_token` in the config), in every engine. New public
      `psd_renice()`. `tests/net/run.sh`: 12/12 plus og `-psnet -pstest` against a fake table.
-   - ⏸ **`net` on DOS**: needs a TCP/IP stack for DJGPP. Watt-32's licence (WATTCP terms in
-     `src/copyrigh.h`: no distribution of modified library versions without permission) is not
-     GPL-compatible, so linking it into PSDOOM.EXE is an owner decision (2026-11-04).
+   - ✅ **`net` on DOS** (2026-11-04): Watt-32's WATTCP terms are not GPL-compatible, so (owner's
+     choice) PSDOOM.EXE has its own UDP: `libpsd/src/dos_net.c` (packet driver found by signature,
+     IPv4 + ARP handles with a locked DPMI real-mode callback filling conventional-memory slots,
+     ARP, IPv4, UDP; address from `PSDOOM_IP`/mTCP's `MTCPCFG`/`WATTCP.CFG`; released at exit).
+     psdoomd also answers UDP on the same address and port: `PSD1 <token> <id> <cmd>`, LIST paged
+     per snapshot, a repeated id replayed rather than re-run (`-psnet udp:HOST:PORT` uses it from
+     any engine). *Exit met in the emulator:* `tools/psdev test dos --vm debian` 6/6: PSDOOM.EXE in
+     DOSBox-X (NE2000 + slirp, Crynwr NE2000.COM) inside tv-debian SIGTERMs two real `sleep`s
+     through psdoomd; a modern psdoomd refuses an `Xorg` decoy to a classic client; a classic one
+     lets it be SIGKILLed; psdoomd's audit log has all of it. `tests/net/run.sh` 21/21 (TCP, UDP,
+     paging, replay; og and Woof! as clients).
+   - Remaining: the same on a real-hardware rig (vcctrl, owner-scheduled), and CONFIG.SYS device
+     drivers as monsters (DOSBox-X loads none, so `backend_dos.c`'s driver path is untested).
+
 8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
    per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random
    signatures, DSDA's `dboolean` and argv, its messenger) and hook scripts

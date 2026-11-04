@@ -34,6 +34,14 @@ Makefile). It may be redistributed without source if:
 A release ships `CWSDPMI.EXE` with `cwsdpmi.doc` and points to
 <https://sandmann.dotster.com/cwsdpmi/>.
 
+## Network
+
+`libpsd/src/dos_net.c` is psdoom-plus's own code (GPL-2.0-or-later). Watt-32 is
+not used: its WATTCP terms (`src/copyrigh.h`: no distribution of modified
+library versions without permission) are not GPL-compatible. Crynwr's
+NE2000.COM (GPL v1, `vendor/crynwr/COPYING.DOC`) is only used by the tests.
+It is a separate program, never linked, and never shipped.
+
 ## Game assets
 
 - `data/psdoom1.wad` and `data/psdoom2.wad`: psDooM's own levels, from the 2000

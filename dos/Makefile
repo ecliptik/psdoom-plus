@@ -9,7 +9,9 @@
 #   make            SDL3 (patched) -> psdoom.exe, psdps.exe
 #   make tests      the test TSRs (tests/*.asm -> build/*.com, needs nasm)
 #   make cwsdpmi    fetch CWSDPMI r7 (sha256-pinned) into vendor/cwsdpmi/
+#   make pktdrv     fetch Crynwr's NE2000 packet driver (tests only) into vendor/crynwr/
 #   make check      tests/dosbox-pstest.sh: TSRs shot in DOSBox-X
+#   make bundle     build/bundle/: what tools/psdev test dos ships to a guest
 
 PORT_NAME := psdoom
 REPO_ROOT := $(abspath .)
@@ -25,7 +27,7 @@ EXE      := $(BUILD_DIR)/psdoom.exe
 # 486 baseline, Pentium scheduling; NOSIMD_FLAGS keeps SDL's SSE paths out.
 OG_CFLAGS := $(NOSIMD_FLAGS) -march=i486 -mtune=pentium
 
-.PHONY: all game og-src clean-game tests cwsdpmi check
+.PHONY: all game og-src clean-game tests cwsdpmi pktdrv check bundle
 all: game
 
 game: sdl3 $(EXE) $(BUILD_DIR)/psdps.exe
@@ -73,3 +75,28 @@ $(CWSDPMI):
 
 check: game tests $(CWSDPMI)
 	tests/dosbox-pstest.sh
+
+# Crynwr packet driver collection 11 (GPL): NE2000.COM for DOSBox-X's NE2000,
+# used by the network tests only; never part of a release
+PKTDRV_ZIP := http://crynwr.com/drivers/pktd11.zip
+PKTDRV_SHA := 5dbf0d465c612c0750ad41368dc1d66876edc66f8471c9981a375779622b240c
+NE2000     := $(VENDOR_DIR)/crynwr/NE2000.COM
+pktdrv: $(NE2000)
+$(NE2000):
+	@mkdir -p $(@D)
+	curl -fsSL $(PKTDRV_ZIP) -o $(@D)/pktd11.zip
+	echo "$(PKTDRV_SHA)  $(@D)/pktd11.zip" | sha256sum -c --quiet
+	unzip -o -q $(@D)/pktd11.zip NE2000.COM COPYING.DOC -d $(@D)
+
+BUNDLE := $(BUILD_DIR)/bundle
+bundle: game tests $(CWSDPMI) $(NE2000)
+	rm -rf $(BUNDLE)
+	mkdir -p $(BUNDLE)
+	cp $(EXE) $(BUNDLE)/PSDOOM.EXE
+	cp $(BUILD_DIR)/psdps.exe $(BUNDLE)/PSDPS.EXE
+	cp $(BUILD_DIR)/tsr.com $(BUNDLE)/TSR.COM
+	cp $(BUILD_DIR)/hooktsr.com $(BUNDLE)/HOOKTSR.COM
+	cp $(CWSDPMI) $(BUNDLE)/CWSDPMI.EXE
+	cp $(NE2000) $(BUNDLE)/NE2000.COM
+	cp $(TOP)/data/psdoom1.wad $(BUNDLE)/PSDOOM1.WAD
+	cp $(TOP)/data/psdoom2.wad $(BUNDLE)/PSDOOM2.WAD

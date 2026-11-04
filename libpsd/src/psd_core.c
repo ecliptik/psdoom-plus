@@ -362,9 +362,7 @@ psd_ctx *psd_open(const psd_config *cfg, int *err)
 	case PSD_BACKEND_CMD:    rc = psd_backend_cmd_open(&ctx->be, &ctx->cfg); break;
 #endif
 	case PSD_BACKEND_MOCK:   rc = psd_backend_mock_open(&ctx->be, &ctx->cfg); break;
-#ifndef PSD_NO_NET
 	case PSD_BACKEND_NET:    rc = psd_backend_net_open(&ctx->be, &ctx->cfg); break;
-#endif
 	default:                 rc = PSD_ERR_BACKEND; break;
 	}
 	if (rc != PSD_OK) {
