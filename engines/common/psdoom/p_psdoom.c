@@ -431,6 +431,8 @@ void PS_LevelEnd (void)
 	psd_reset (ctx);
 }
 
+static void test_finish (int code);
+
 void PS_LevelStart (void)
 {
     active = level_qualifies ();
@@ -440,6 +442,13 @@ void PS_LevelStart (void)
 	PSE_MapEnd ();
 	if (test_state)
 	    test_deadline = leveltime + 35 * 30;
+    }
+    else if (test_state && ctx && !demoplayback)
+    {
+	// -pstest on a level that gets no pid monsters would wait forever
+	printf ("psdoom: -pstest: this level gets no process monsters "
+		"(psDooM uses E1M1 or Doom II's MAP01)\n");
+	test_finish (1);
     }
 }
 

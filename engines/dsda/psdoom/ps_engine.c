@@ -39,9 +39,12 @@ boolean PSE_IsDoom1 (void)
     return gamemode == registered || gamemode == retail;
 }
 
+// Doom II or Freedoom: Phase 2 (DSDA-Doom calls its mission tc_freedoom),
+// not TNT or Plutonia
 boolean PSE_IsDoom2 (void)
 {
-    return gamemode == commercial && gamemission == doom2;
+    return gamemode == commercial
+	&& (gamemission == doom2 || gamemission == tc_freedoom);
 }
 
 void PSE_AddWad (const char* path)
