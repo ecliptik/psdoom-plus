@@ -45,6 +45,19 @@ PSDOOMD_TOKEN=<secret> psdoomd -l 192.168.1.10:6666          # on the target (mo
 PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
 ```
 
+## Screenshots
+
+Shareware Doom's E1M1, each engine facing the same process table: postgres is a Demon (a
+daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid and the name.
+(The process table is staged through the psdoom-ng hook, so nothing was actually killed.)
+
+| | |
+|---|---|
+| ![og](docs/screenshots/og.png) og (id's linuxdoom-1.10 on SDL3) | ![Crispy Doom](docs/screenshots/crispy.png) Crispy Doom |
+| ![Woof!](docs/screenshots/woof.png) Woof! | ![DSDA-Doom](docs/screenshots/dsda.png) DSDA-Doom |
+| ![GZDoom](docs/screenshots/gzdoom.png) GZDoom | ![UZDoom](docs/screenshots/uzdoom.png) UZDoom |
+| ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): COMMAND.COM and PSDOOM itself, both protected in modern mode | |
+
 ## Layout
 
 | Path | What |
