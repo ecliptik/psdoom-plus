@@ -14,6 +14,13 @@
 
 static SDL_AudioStream *stream;
 
+#ifdef __DJGPP__
+// SDL3-DOS (hub patch 0070) samples this engine-owned counter of active
+// software-synth voices for an instrumentation histogram. og mixes in
+// i_sound.c, not in a synth, so it stays zero (as in dosags).
+volatile Uint32 g_dos_sfx_synth_active_count;
+#endif
+
 int I_AudioOpen(int rate)
 {
 	SDL_AudioSpec spec;

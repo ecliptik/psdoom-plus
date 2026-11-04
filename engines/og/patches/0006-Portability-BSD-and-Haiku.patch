@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:25:08 -0800
-Subject: [PATCH 6/6] Portability: BSD and Haiku
+Subject: [PATCH 6/7] Portability: BSD and Haiku
 
 - i_net.c: IPPORT_USERRESERVED is Linux-only; use its value (5000).
 - m_bbox.h: <values.h> is glibc-only; MAXINT/MININT come from doomtype.h.

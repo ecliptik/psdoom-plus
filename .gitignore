@@ -29,3 +29,7 @@ screenshot*.png
 # editors
 *~
 .*.swp
+
+# Claude Code local state, except the sdldos plugin enablement (dos/)
+.claude/*
+!.claude/settings.json

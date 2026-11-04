@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:15:26 -0800
-Subject: [PATCH 5/6] psDooM: processes as monsters, through libpsd
+Subject: [PATCH 5/7] psDooM: processes as monsters, through libpsd
 
 The hooks psDooM 2000.05.03.b added to XDoom, on linuxdoom-1.10. The
 logic lives in psdoom/p_psdoom.c (psdoom-plus tree) and libpsd; this

@@ -22,6 +22,11 @@ psd_config *psd_config_new(void)
 	cfg->backend = PSD_BACKEND_NATIVE;
 	cfg->max_procs = -1;
 	cfg->grace_ms = -1;
+#ifdef __DJGPP__
+	/* a DOS box has a handful of residents: show the untouchable ones too,
+	 * as invulnerable monsters (CWSDPMI, hooked TSRs, linked drivers) */
+	cfg->show_protected = 1;
+#endif
 	return cfg;
 }
 

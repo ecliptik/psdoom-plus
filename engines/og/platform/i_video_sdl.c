@@ -1,7 +1,8 @@
 // i_video_sdl.c - SDL3 video and input for linuxdoom-1.10
 //
 // Replaces id's X11 i_video.c. 320x200 8-bit screens[0] -> ARGB texture,
-// shown at 4:3 with nearest-neighbour scaling.
+// shown at 4:3 with nearest-neighbour scaling; on DOS (or with -swsurface)
+// straight into an 8-bit window surface instead.
 //
 // Copyright (C) 1993-1996 by id Software, Inc.
 // Copyright (C) 2026 psdoom-plus contributors
@@ -30,6 +31,65 @@ static Uint32        argb[256];
 static boolean       grabmouse;
 static int           mousebuttons;
 
+// 8-bit window-surface path: the default on DOS (VGA mode 13h, so a frame
+// is a 64000-byte copy and a palette load), -swsurface elsewhere.
+static boolean       use_surface;
+static SDL_Surface  *shadow8;        // screens[0] as an INDEX8 surface
+static SDL_Color     colors[256];
+
+static void InitSurfaceVideo(void)
+{
+	SDL_DisplayMode **modes;
+	int i, n = 0;
+
+	window = SDL_CreateWindow("psdoom-plus", SCREENWIDTH, SCREENHEIGHT,
+	                          M_CheckParm("-window") ? 0 : SDL_WINDOW_FULLSCREEN);
+	if (window == NULL)
+		I_Error("I_InitGraphics: %s", SDL_GetError());
+	modes = SDL_GetFullscreenDisplayModes(SDL_GetPrimaryDisplay(), &n);
+	for (i = 0; modes && i < n; i++)
+		if (modes[i]->w == SCREENWIDTH && modes[i]->h == SCREENHEIGHT &&
+		    modes[i]->format == SDL_PIXELFORMAT_INDEX8) {
+			SDL_SetWindowFullscreenMode(window, modes[i]);
+			break;
+		}
+	SDL_free(modes);
+	SDL_SyncWindow(window);
+	shadow8 = SDL_CreateSurfaceFrom(SCREENWIDTH, SCREENHEIGHT, SDL_PIXELFORMAT_INDEX8,
+	                                screens[0], SCREENWIDTH);
+	if (shadow8 == NULL || SDL_CreateSurfacePalette(shadow8) == NULL ||
+	    SDL_GetWindowSurface(window) == NULL)
+		I_Error("I_InitGraphics: %s", SDL_GetError());
+}
+
+static void FinishSurfaceUpdate(void)
+{
+	SDL_Surface *ws = SDL_GetWindowSurface(window);
+	int y;
+
+	if (ws == NULL)
+		return;
+	if (ws->format == SDL_PIXELFORMAT_INDEX8 &&
+	    SDL_GetSurfacePalette(ws) != SDL_GetSurfacePalette(shadow8))
+		// SDL gives the window surface no palette; share ours, so that
+		// I_SetPalette reaches the VGA DAC (SDL3-DOS programs it from here)
+		SDL_SetSurfacePalette(ws, SDL_GetSurfacePalette(shadow8));
+	if (ws->format == SDL_PIXELFORMAT_INDEX8 && ws->w == SCREENWIDTH &&
+	    ws->h == SCREENHEIGHT) {
+		// same size and depth: rows straight into the framebuffer
+		if (SDL_MUSTLOCK(ws) && !SDL_LockSurface(ws))
+			return;
+		for (y = 0; y < SCREENHEIGHT; y++)
+			memcpy((Uint8 *)ws->pixels + y * ws->pitch,
+			       screens[0] + y * SCREENWIDTH, SCREENWIDTH);
+		if (SDL_MUSTLOCK(ws))
+			SDL_UnlockSurface(ws);
+	} else {
+		SDL_BlitSurfaceScaled(shadow8, NULL, ws, NULL, SDL_SCALEMODE_NEAREST);
+	}
+	SDL_UpdateWindowSurface(window);
+}
+
 void I_InitGraphics(void)
 {
 	static boolean done;
@@ -47,9 +107,22 @@ void I_InitGraphics(void)
 	if (M_CheckParm("-fullscreen"))
 		flags |= SDL_WINDOW_FULLSCREEN;
 	grabmouse = M_CheckParm("-grabmouse") != 0;
+#ifdef __DJGPP__
+	use_surface = true;
+	grabmouse = !M_CheckParm("-nomouse");   // DOS: fullscreen, mouse is ours
+#else
+	use_surface = M_CheckParm("-swsurface") != 0;
+#endif
 
 	if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
 		I_Error("I_InitGraphics: %s", SDL_GetError());
+
+	if (use_surface) {
+		InitSurfaceVideo();
+		if (grabmouse)
+			SDL_SetWindowRelativeMouseMode(window, true);
+		return;
+	}
 
 	window = SDL_CreateWindow("psdoom-plus", SCREENWIDTH * scale,
 	                          SCREENHEIGHT * scale * 6 / 5, flags);
@@ -74,6 +147,8 @@ void I_InitGraphics(void)
 
 void I_ShutdownGraphics(void)
 {
+	if (shadow8)  SDL_DestroySurface(shadow8);
+	shadow8 = NULL;
 	if (texture)  SDL_DestroyTexture(texture);
 	if (renderer) SDL_DestroyRenderer(renderer);
 	if (window)   SDL_DestroyWindow(window);
@@ -92,7 +167,13 @@ void I_SetPalette(byte *palette)
 		Uint32 g = gammatable[usegamma][*palette++];
 		Uint32 b = gammatable[usegamma][*palette++];
 		argb[i] = 0xff000000u | (r << 16) | (g << 8) | b;
+		colors[i].r = (Uint8)r;
+		colors[i].g = (Uint8)g;
+		colors[i].b = (Uint8)b;
+		colors[i].a = 255;
 	}
+	if (use_surface && shadow8)
+		SDL_SetPaletteColors(SDL_GetSurfacePalette(shadow8), colors, 0, 256);
 }
 
 void I_UpdateNoBlit(void)
@@ -105,6 +186,10 @@ void I_FinishUpdate(void)
 	int pitch, x, y;
 	const byte *src = screens[0];
 
+	if (use_surface) {
+		FinishSurfaceUpdate();
+		return;
+	}
 	if (texture == NULL)
 		return;
 	if (!SDL_LockTexture(texture, NULL, &pixels, &pitch))

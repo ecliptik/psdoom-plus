@@ -1,0 +1,620 @@
+From 210b6c74b78daea85b534021210c0b97adc07aef Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 23 Sep 2026 10:39:49 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0144 -- deferred MIDI port writes,
+ replayed on time by the SB IRQ (opt-in)
+
+WHY DOS NEEDS THIS: a port that runs its MIDI scheduler from the main
+loop gets note timing quantised to the render rate -- every event due
+between two polls goes out in one batch at the next poll -- and frozen
+through any main-loop stall. dosags (AGS) measured it on real hardware
+(PLAN.md, 8.3 re-run SB4O/SB4W, 2026-09-23): the 640x480 intro renders at
+~6 fps on the 486 and 72% of MIDI events went out more than 50 ms late in
+regular 150-200 ms bursts, heard as the music "speeding up randomly",
+while overall tempo was right. doskutsu solved the same problem with
+SDL/0072 by running its own fixed-point scheduler inside the SB IRQ. A
+port that uses the hub's shared midi_sched + opl3_sink/waveblaster_sink
+cannot: midi_sched_tick uses the FPU, the sinks allocate at open and keep
+unlocked state -- none of it may run in an ISR.
+
+WHAT: the port keeps its scheduler and sinks on the main thread,
+unchanged, but runs them AHEAD, one IRQ slot at a time; the SB ISR plays
+the result at the right IRQ.
+  - SDL_DOSMidiDeferEnable(kind) (SDL_dosmidi_tick.h): 1 = OPL3 register
+    writes (SDL_DOSOpl3WriteRegister), 2 = MPU-401 bytes
+    (SDL_DOSMpu401WriteByte). Kind 2 only on the blind direct-port
+    transport: the SDL/0093 DRR status read (ISA IOCHRDY can stall the
+    CPU), the SDL/0098 TX-delay PIT busy-wait and the DSP-mediated path are
+    refused, as is a closed SB device.
+  - While enabled, each write of that kind is captured into a fixed
+    8192-entry queue stamped with SDL_DOSMidiDeferSetStamp's IRQ index
+    (SDL_DOSMidiDeferIrqNow = dos_port_audio_irq_count: one IRQ = one DMA
+    half-buffer, the device's own clock).
+  - Every SB IRQ, after the existing counters and before the SDL/0072
+    tick, writes out the queue head while its stamp is due, at most 256
+    entries per IRQ.
+  - Stats: SDL_DOSMidiDeferStats (written, written >= 1 IRQ late, most
+    IRQs late, most in one IRQ, captures refused because the queue was
+    full); SDL_DOSMidiDeferStats2 (discarded unplayed, written by a
+    disable).
+
+ISR constraints, as met by the code:
+  - The ISR path (MidiDeferDrain, MidiDeferWriteOne) is integer ops and
+    inportb/outportb only: no malloc/free, no printf/log, no FPU, no uclock,
+    no SDL call.
+  - Single producer (main thread) / single consumer (ISR). The entry is
+    stored, then a compiler barrier, then the tail moves; the ISR reads the
+    entry after seeing the tail.
+  - Locked memory: the queue arrays and their indices are DPMI-locked at
+    the first enable; g_mdq_kind/g_mdq_hold at OpenDevice with the ISR's
+    other variables, because a port's own ISR (the 0072 tick) reaches the
+    write primitives that test them.
+  - The drain code's lock is DOS_LockCode(MidiDeferWriteOne,
+    MidiDeferDrain_End). That relies on source-order function layout, which
+    DJGPP gcc 12 -O2 does not keep: in the built object MidiDeferDrain is
+    inlined into SoundBlasterIRQHandler, whose own range is already
+    negative in this series. The next patch (0145) replaces that
+    assumption for every ISR.
+
+Ordering and bounds:
+  - SDL_DOSOpl3Detect/InitChip/Shutdown HOLD the deferral while they run:
+    their writes go direct and the ISR writes nothing, so it cannot
+    interleave with their address/data writes. This holds even across
+    Detect's SDL_DelayPrecise: that ends in DOS_Yield, and the thread
+    switch's longjmp restores the other thread's EFLAGS (DJGPP's longjmp
+    ends in iret), so the cli a first version relied on did not hold. With
+    deferral off, Hold(true) is a no-op and the three run as before.
+  - Enable(0) stops the ISR consuming, then writes out at most 1024 queued
+    entries from the caller in batches of 32, with interrupts off only
+    around each batch, and discards the rest, counted.
+  - CloseDevice with deferral on stops it (later writes go direct) and
+    discards the queue, counted.
+
+Cost for a port that never calls SDL_DOSMidiDeferEnable (doskutsu's
+SDL/0072 path, every SDL_mixer port):
+  - one test of a locked byte per IRQ (g_mdq_kind != 0, false);
+  - per OPL register write / MPU byte, including the ones its own
+    SDL/0072 ISR callback makes: the inline test
+    `g_mdq_kind == k && !g_mdq_hold && ...` on two locked bytes. The
+    dosags message counts this as two tests; with deferral off,
+    g_mdq_kind == k is false and short-circuits, so one byte is read
+    and the capture call is never reached;
+  - one SDL_DOSMidiDeferHold call per Detect/InitChip/Shutdown, returning
+    false without touching anything.
+The SDL/0072 tick itself (hook, callback, now_ms) is not touched.
+
+Validation: DOSBox-X only; hardware confirmation pending.
+  - Hub scratch probe, dosbox-run.sh --sb-live, a conf identical to
+    dosbox-x-fast.conf but oplmode=opl3, device 11025 Hz via
+    SDL_DOSAudioSetDeviceFrameRate (512-frame IRQs, 46.44 ms):
+      A, 86 slots x 2 OPL writes, 43-IRQ lookahead, SDL_Delay(1500)
+        mid-way: 64 written during the stall with 64 due, 172/172
+        written, 0 late, burst_max 2.
+      B, same without the stall: 172/172, 0 late.
+      C, control on the same build, deferred API never called: all
+        deferral counters 0; an SDL/0072 tick callback writing an OPL
+        register from the IRQ gives 64 callbacks / 16 ISR OPL writes in
+        65 IRQs, the same as the 0143 build.
+      D, 300 Detect calls with deferral on and 800 writes queued: 30
+        IRQs fired inside a Detect, 0 deferred writes inside; 300/300
+        detected. The first version of this patch: 28 IRQs and 56 writes
+        inside.
+  - dosags (PLAN.md "MIDI TIMING FIX RESULT", ags-0207-clean
+    7d43b8e155ed, cells MISI4/MITI4 vs MISP4/MITP4), 5 Days a Stranger,
+    OPL3:
+      1.5 s stalls every 150 ticks: late_max_ms 0, 0 of 22468 writes late,
+        the ISR kept writing through every stall; the poll control reached
+        1560 ms.
+      ~6 fps render throttle: 0 of 27112 writes late; the poll control
+        had 9583 of 11686 events more than 50 ms late.
+  - OPL3 only. WaveBlaster stays on the main-loop poll, by design, and
+    the WB ISR path is NOT demonstrated:
+      - the cold-init MPU transport paces each byte with the SDL/0098
+        320 us busy-wait (the DreamBlaster input-overrun fix; this
+        series' code comment: "freeze-proof + fixes H20 garble");
+      - a busy-wait like that has no place in an ISR, so kind 2 accepts
+        only the blind transport (no status read, no delay), which is
+        the configuration that garbles on the DreamBlaster;
+      - dosags' WB cells (MIWI) therefore ran on the poll, and no run
+        here or in dosags exercised kind 2 in the ISR.
+  - KNOWN LIMITATION: in ISR mode a port that advances song time by
+    the nominal IRQ period follows the card's actual playback rate.
+    (Corrected 2026-09-23: this first said 0.988-0.996 on DOSBox-X and
+    about -0.33% on the PicoGUS. Both were wrong. The DOSBox-X 0.988 was
+    an error in dosags' own witness, which truncated each gap to whole
+    ms. DOSBox-X's measured period is nominal, 46436-46447 us. On real
+    hardware the PicoGUS in SB 2.0 mode at 11025 Hz measured 46127 us
+    against 46439 nominal, 0.68% fast (dosags SB5O). A port should
+    advance song time by the period measured against uclock, as dosags
+    ags 0208 does. With that, OPL3 on the 486 read 0 of 12233 writes
+    late at a 6 fps render rate, with the song clock 0.998 against the
+    RTC.)
+
+Source: dosags patches/SDL/0193 (From 097def7cde2c, committed in dosags
+15d2149), re-derived against the hub series. One hunk's context is a
+dosags-only patch (its 0141 uclock() write-cost diagnostic inside
+SDL_DOSOpl3WriteRegister); the hub function has the same address/data
+sequence without it, so the capture test sits at the top of the hub
+function and nothing from 0141 is imported. Also changed from the dosags
+file, all comments or declaration placement:
+  - tags renumbered 0193 -> 0144;
+  - the new declarations moved inside the header's extern "C" block,
+    before its closing comment;
+  - the header's stale "Enable(0) writes out whatever is still queued, at
+    once" replaced by the bounded behaviour the code has;
+  - the ISR write's comment no longer mentions a diagnostic this series
+    does not have.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Nz9XeKeVG8Ab7dm8esJsMu
+---
+ include/SDL3/SDL_dosmidi_tick.h    |  28 ++++
+ src/audio/dos/SDL_dosaudio_sb.c    | 255 +++++++++++++++++++++++++++++
+ src/core/dos/SDL_dos_audio_synth.c |  62 ++++++-
+ src/core/dos/SDL_dos_audio_synth.h |  14 ++
+ 4 files changed, 356 insertions(+), 3 deletions(-)
+
+diff --git a/include/SDL3/SDL_dosmidi_tick.h b/include/SDL3/SDL_dosmidi_tick.h
+index 5fc98b637..e83486ebe 100644
+--- a/include/SDL3/SDL_dosmidi_tick.h
++++ b/include/SDL3/SDL_dosmidi_tick.h
+@@ -254,6 +254,34 @@ extern SDL_DECLSPEC bool SDLCALL SDL_DOSMidiIsrAnyActive(void);
+  */
+ extern SDL_DECLSPEC SDL_DOSMidiTickCallback SDLCALL SDL_DOSMidiTickGetRegistered(void);
+ 
++/**
++ * DOS-PORT patch 0144: deferred MIDI port writes, replayed by the SB IRQ.
++ *
++ * For a port whose MIDI scheduler runs on the main loop and cannot run in
++ * an ISR. While enabled for a kind (1 = OPL3 register writes, 2 = MPU-401
++ * bytes on the blind direct-port transport), every write of that kind is
++ * captured into a locked queue stamped with the current stamp
++ * (SDL_DOSMidiDeferSetStamp: an IRQ index, compare SDL_DOSMidiDeferIrqNow)
++ * and written out by the SB ISR at that IRQ. The port plans its song ahead
++ * of time, one IRQ slot at a time, setting the stamp for each slot. Returns
++ * false (nothing enabled) when the SB device is not open or, for kind 2,
++ * the MPU transport is not the blind direct one. Enable(0) stops
++ * capturing, writes out up to 1024 still-queued entries from the calling
++ * thread (interrupts off only around each batch of 32) and discards the
++ * rest, counted in SDL_DOSMidiDeferStats2. Default off.
++ */
++extern SDL_DECLSPEC bool SDLCALL SDL_DOSMidiDeferEnable(int kind);
++extern SDL_DECLSPEC void SDLCALL SDL_DOSMidiDeferSetStamp(Uint32 irq_index);
++extern SDL_DECLSPEC Uint32 SDLCALL SDL_DOSMidiDeferIrqNow(void);
++extern SDL_DECLSPEC int SDLCALL SDL_DOSMidiDeferIrqPeriodUs(void);
++extern SDL_DECLSPEC int SDLCALL SDL_DOSMidiDeferFree(void);
++extern SDL_DECLSPEC void SDLCALL SDL_DOSMidiDeferFlush(void);
++extern SDL_DECLSPEC void SDLCALL SDL_DOSMidiDeferStats(Uint32 *written, Uint32 *late, Uint32 *late_max,
++                                                       Uint32 *burst_max, Uint32 *full);
++/* Entries discarded unplayed (a disable past its bound, or the device
++   closing with deferral on) and entries a disable wrote from the main thread. */
++extern SDL_DECLSPEC void SDLCALL SDL_DOSMidiDeferStats2(Uint32 *dropped, Uint32 *sync);
++
+ /* Ends C function definitions when using C++ */
+ #ifdef __cplusplus
+ }
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index bcfced73f..e53b31239 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -1639,6 +1639,244 @@ bool SDL_DOSMidiIsrTickActive(void)
+     return g_dos_midi_isr_tick_active;
+ }
+ 
++/* ========================================================================
++ * DOS-PORT patch 0144: deferred MIDI port writes, replayed by this ISR.
++ * ========================================================================
++ * A port whose MIDI scheduler runs on the main loop gets its note timing
++ * quantised to the render rate (every event due between two polls goes out
++ * in one batch at the next poll) and frozen through any main-loop stall.
++ * This keeps the scheduler and its sinks on the main thread, unchanged, but
++ * lets them run AHEAD: while enabled, every OPL register write
++ * (SDL_DOSOpl3WriteRegister) or MPU-401 byte (SDL_DOSMpu401WriteByte) of the
++ * enabled kind is captured into the queue below, stamped with the IRQ index
++ * it is due at (SDL_DOSMidiDeferSetStamp), and this ISR writes each entry out
++ * at that IRQ with raw port I/O only -- no FPU, no allocation, no SDL call;
++ * code and data locked when enabled. Default off: a port that never calls
++ * SDL_DOSMidiDeferEnable() sees one cached-bool test per IRQ and nothing else.
++ */
++#define MIDI_DEFER_QUEUE 8192u             /* entries, power of two */
++#define MIDI_DEFER_MAX_PER_IRQ 256u        /* bound on ISR time per IRQ */
++#define MIDI_DEFER_SYNC_MAX 1024u          /* bound on a disable's main-thread write-out */
++#define MIDI_DEFER_SYNC_BATCH 32u          /* entries per interrupts-off batch */
++volatile Uint8 g_mdq_kind = 0;             /* 0 off, 1 OPL3, 2 MPU-401 blind direct */
++volatile Uint8 g_mdq_hold = 0;             /* 1 = ISR writes nothing, capture refuses */
++static volatile Uint32 g_mdq_head = 0;     /* consumer (ISR) index, monotonic */
++static volatile Uint32 g_mdq_tail = 0;     /* producer (main thread) index, monotonic */
++static volatile Uint32 g_mdq_stamp_now = 0;/* stamp given to entries captured now */
++static Uint16 g_mdq_mpu_base = 0;
++static Uint32 g_mdq_stamp[MIDI_DEFER_QUEUE];
++static Uint16 g_mdq_reg[MIDI_DEFER_QUEUE];
++static Uint8 g_mdq_val[MIDI_DEFER_QUEUE];
++static volatile Uint32 g_mdq_written = 0;  /* entries written out by the ISR */
++static volatile Uint32 g_mdq_late = 0;     /* ... of which written >= 1 IRQ after their stamp */
++static volatile Uint32 g_mdq_late_max = 0; /* the most IRQs any entry was late */
++static volatile Uint32 g_mdq_burst_max = 0;/* the most entries written in one IRQ */
++static volatile Uint32 g_mdq_full = 0;     /* captures refused because the queue was full */
++static volatile Uint32 g_mdq_dropped = 0;  /* entries discarded unplayed (bounded disable, device close) */
++static volatile Uint32 g_mdq_sync = 0;     /* entries written from the main thread by a disable */
++static bool g_mdq_locked = false;
++
++static void MidiDeferWriteOne(Uint32 idx)
++{
++    const Uint16 reg = g_mdq_reg[idx];
++    const Uint8 val = g_mdq_val[idx];
++    if (g_mdq_kind == 2) {
++        outportb(g_mdq_mpu_base, val);
++        return;
++    }
++    /* OPL: the same address/data sequence as SDL_DOSOpl3WriteRegister. */
++    const Uint16 addr_port = (reg < 0x100) ? 0x388 : 0x38A;
++    const Uint16 data_port = (reg < 0x100) ? 0x389 : 0x38B;
++    outportb(addr_port, (Uint8)(reg & 0xFF));
++    for (int i = 0; i < 6; i++) {
++        (void)inportb(0x388);
++    }
++    outportb(data_port, val);
++    for (int i = 0; i < 6; i++) {
++        (void)inportb(0x388);
++    }
++}
++
++static void MidiDeferDrain(Uint32 irq_now)
++{
++    Uint32 n = 0;
++    if (g_mdq_hold) {
++        return; /* chip detect/init/shutdown in progress on the main thread */
++    }
++    while (g_mdq_head != g_mdq_tail && n < MIDI_DEFER_MAX_PER_IRQ) {
++        __asm__ __volatile__("" ::: "memory"); /* read the entry after seeing the tail */
++        const Uint32 idx = g_mdq_head & (MIDI_DEFER_QUEUE - 1u);
++        const Sint32 late = (Sint32)(irq_now - g_mdq_stamp[idx]);
++        if (late < 0) {
++            break; /* FIFO: the head is not due yet, nothing behind it is either */
++        }
++        MidiDeferWriteOne(idx);
++        g_mdq_head = g_mdq_head + 1u;
++        g_mdq_written++;
++        if (late >= 1) {
++            g_mdq_late++;
++            if ((Uint32)late > g_mdq_late_max) {
++                g_mdq_late_max = (Uint32)late;
++            }
++        }
++        n++;
++    }
++    if (n > g_mdq_burst_max) {
++        g_mdq_burst_max = n;
++    }
++}
++static void MidiDeferDrain_End(void) {}
++
++/* Main thread. Captures one write for later; false = not captured (the
++   caller writes it directly). Refused when off, for the other kind, or
++   when the queue is full (counted). */
++bool SDL_DOSMidiDeferCapture(Uint8 kind, Uint16 reg, Uint8 val)
++{
++    if (g_mdq_kind == 0 || g_mdq_kind != kind) {
++        return false;
++    }
++    if (g_mdq_tail - g_mdq_head >= MIDI_DEFER_QUEUE) {
++        g_mdq_full++;
++        return false;
++    }
++    const Uint32 idx = g_mdq_tail & (MIDI_DEFER_QUEUE - 1u);
++    g_mdq_stamp[idx] = g_mdq_stamp_now;
++    g_mdq_reg[idx] = reg;
++    g_mdq_val[idx] = val;
++    __asm__ __volatile__("" ::: "memory"); /* the entry is stored before the tail moves */
++    g_mdq_tail = g_mdq_tail + 1u; /* publish after the entry is complete */
++    return true;
++}
++
++bool SDL_DOSMidiDeferHold(bool hold)
++{
++    if (hold) {
++        if (g_mdq_kind == 0) {
++            return false;
++        }
++        g_mdq_hold = 1;
++        return true;
++    }
++    g_mdq_hold = 0;
++    return true;
++}
++
++Uint32 SDL_DOSMidiDeferIrqNow(void)
++{
++    return dos_port_audio_irq_count;
++}
++
++int SDL_DOSMidiDeferIrqPeriodUs(void)
++{
++    SDL_AudioDevice *device = g_dos_audio_device;
++    if (!device || device->spec.freq <= 0) {
++        return 0;
++    }
++    return (int)(((Sint64)device->sample_frames * 1000000) / device->spec.freq);
++}
++
++void SDL_DOSMidiDeferSetStamp(Uint32 irq_index)
++{
++    g_mdq_stamp_now = irq_index;
++}
++
++int SDL_DOSMidiDeferFree(void)
++{
++    return (int)(MIDI_DEFER_QUEUE - (g_mdq_tail - g_mdq_head));
++}
++
++void SDL_DOSMidiDeferFlush(void)
++{
++    DOS_DisableInterrupts();
++    g_mdq_head = g_mdq_tail;
++    DOS_EnableInterrupts();
++}
++
++void SDL_DOSMidiDeferStats2(Uint32 *dropped, Uint32 *sync)
++{
++    if (dropped) *dropped = g_mdq_dropped;
++    if (sync) *sync = g_mdq_sync;
++}
++
++void SDL_DOSMidiDeferStats(Uint32 *written, Uint32 *late, Uint32 *late_max, Uint32 *burst_max, Uint32 *full)
++{
++    if (written) *written = g_mdq_written;
++    if (late) *late = g_mdq_late;
++    if (late_max) *late_max = g_mdq_late_max;
++    if (burst_max) *burst_max = g_mdq_burst_max;
++    if (full) *full = g_mdq_full;
++}
++
++bool SDL_DOSMidiDeferEnable(int kind)
++{
++    if (kind == 0) {
++        /* Off: stop the ISR consuming, then write out what is still queued
++           from here -- at most MIDI_DEFER_SYNC_MAX entries, in batches of
++           MIDI_DEFER_SYNC_BATCH with interrupts off only around each batch
++           (a long cli on ISA loses timer ticks, and uclock is the pacer's
++           clock); anything beyond the bound is discarded and counted. The
++           ports' own stop path flushes the planned-ahead writes first, so
++           normally only a song's note-offs are left here. */
++        if (g_mdq_kind == 0) {
++            return true;
++        }
++        const Uint8 k = g_mdq_kind;
++        DOS_DisableInterrupts();
++        g_mdq_kind = 0; /* the ISR stops draining; capture refuses */
++        DOS_EnableInterrupts();
++        Uint32 done = 0;
++        while (g_mdq_head != g_mdq_tail && done < MIDI_DEFER_SYNC_MAX) {
++            DOS_DisableInterrupts();
++            for (Uint32 b = 0; b < MIDI_DEFER_SYNC_BATCH && g_mdq_head != g_mdq_tail; b++) {
++                const Uint32 idx = g_mdq_head & (MIDI_DEFER_QUEUE - 1u);
++                if (k == 2) {
++                    outportb(g_mdq_mpu_base, g_mdq_val[idx]);
++                } else {
++                    const Uint16 reg = g_mdq_reg[idx];
++                    outportb((reg < 0x100) ? 0x388 : 0x38A, (Uint8)(reg & 0xFF));
++                    for (int i = 0; i < 6; i++) (void)inportb(0x388);
++                    outportb((reg < 0x100) ? 0x389 : 0x38B, g_mdq_val[idx]);
++                    for (int i = 0; i < 6; i++) (void)inportb(0x388);
++                }
++                g_mdq_head = g_mdq_head + 1u;
++                done++;
++            }
++            DOS_EnableInterrupts();
++        }
++        g_mdq_sync += done;
++        g_mdq_dropped += g_mdq_tail - g_mdq_head;
++        g_mdq_head = g_mdq_tail;
++        return true;
++    }
++    if (!g_dos_sb_device_open || (kind != 1 && kind != 2)) {
++        return false; /* no SB IRQ to replay from */
++    }
++    if (kind == 2 && !SDL_DOSMpu401BlindDirectBase(&g_mdq_mpu_base)) {
++        return false; /* DSP-mediated, DRR-poll or TX-delay transport: not ISR-safe here */
++    }
++    if (!g_mdq_locked) {
++        DOS_LockCode(MidiDeferWriteOne, MidiDeferDrain_End);
++        DOS_LockData(g_mdq_stamp, sizeof(g_mdq_stamp));
++        DOS_LockData(g_mdq_reg, sizeof(g_mdq_reg));
++        DOS_LockData(g_mdq_val, sizeof(g_mdq_val));
++        DOS_LockVariable(g_mdq_kind);
++        DOS_LockVariable(g_mdq_head);
++        DOS_LockVariable(g_mdq_tail);
++        DOS_LockVariable(g_mdq_mpu_base);
++        DOS_LockVariable(g_mdq_written);
++        DOS_LockVariable(g_mdq_late);
++        DOS_LockVariable(g_mdq_late_max);
++        DOS_LockVariable(g_mdq_burst_max);
++        g_mdq_locked = true;
++    }
++    DOS_DisableInterrupts();
++    g_mdq_head = g_mdq_tail;
++    g_mdq_stamp_now = dos_port_audio_irq_count;
++    g_mdq_kind = (Uint8)kind;
++    DOS_EnableInterrupts();
++    return true;
++}
++
+ // The IRQ handler. Copies one chunk from the ring buffer into the DMA
+ // half-buffer that the hardware isn't currently playing. If the ring is
+ // empty it fills with silence (no stutter, just a brief gap).
+@@ -1745,6 +1983,11 @@ static void SoundBlasterIRQHandler(void)
+         dos_port_audio_sfx_active_count++;
+     }
+ 
++    /* DOS-PORT patch 0144: replay the deferred MIDI writes due by now. */
++    if (g_mdq_kind != 0) {
++        MidiDeferDrain(dos_port_audio_irq_count);
++    }
++
+     /* DOSKUTSU patch (Phase 11 patch 0072): Lever 2b -- MidiScheduler
+        tick from the IRQ-5 ISR. Cached-bool gated + callback-non-NULL
+        gated; under killswitch OFF or no engine callback registered
+@@ -2918,6 +3161,8 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+     DOS_LockCode(ISR_GetDMAHalf, ISR_GetDMAHalf_End);
+     DOS_LockData(*hidden->ring_buffer, hidden->ring_size);
+     DOS_LockVariable(isr_ring_read);
++    DOS_LockVariable(g_mdq_kind); /* DOS-PORT patch 0144: tested by the ISR every IRQ, and by the */
++    DOS_LockVariable(g_mdq_hold); /* OPL/MPU write primitives, which a port's own ISR may call */
+     DOS_LockVariable(isr_ring_write);
+     DOS_LockVariable(isr_ring_size);
+     DOS_LockVariable(isr_ring_mask);
+@@ -4159,6 +4404,16 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+ static void DOSSOUNDBLASTER_CloseDevice(SDL_AudioDevice *device)
+ {
+     struct SDL_PrivateAudioData *hidden = device->hidden;
++    /* DOS-PORT patch 0144: the IRQ that replays deferred MIDI writes is going
++       away. Stop deferring (later writes go direct) and discard what is still
++       queued, counted -- there is no clock left to play it on. */
++    if (g_mdq_kind != 0) {
++        DOS_DisableInterrupts();
++        g_mdq_kind = 0;
++        g_mdq_dropped += g_mdq_tail - g_mdq_head;
++        g_mdq_head = g_mdq_tail;
++        DOS_EnableInterrupts();
++    }
+     /* SDL/0099: bus is going cold (teardown begins). Clear the hot flag first so a
+        cold-init after this close sees a cold bus again. Unconditional (safe even
+        if hidden is NULL -- then nothing was hot anyway). */
+diff --git a/src/core/dos/SDL_dos_audio_synth.c b/src/core/dos/SDL_dos_audio_synth.c
+index b373664ff..18193a3e9 100644
+--- a/src/core/dos/SDL_dos_audio_synth.c
++++ b/src/core/dos/SDL_dos_audio_synth.c
+@@ -768,11 +768,31 @@ static void mpu401_tx_pace_delay(uint32_t us)
+     }
+ }
+ 
++/* DOS-PORT patch 0144: true (and the port base) only for the transport that
++   is safe to replay from an ISR: direct port, blind (no DRR status read --
++   SDL/0093's IOCHRDY stall), no TX-delay PIT busy-wait, not DSP-mediated. */
++bool SDL_DOSMpu401BlindDirectBase(Uint16 *out_base)
++{
++    if (s_mpu401_port_base < 0 || s_mpu401_use_dsp || s_mpu401_drr_poll_enabled || s_mpu401_tx_delay_us > 0) {
++        return false;
++    }
++    if (out_base) {
++        *out_base = (Uint16)s_mpu401_port_base;
++    }
++    return true;
++}
++
+ void SDL_DOSMpu401WriteByte(uint8_t byte)
+ {
+     if (s_mpu401_port_base < 0) {
+         return; /* not initialized; silent no-op per docs */
+     }
++    /* DOS-PORT patch 0144: deferred to the SB ISR when the port enabled it
++       for MPU-401 (only ever for the blind direct-port transport). */
++    if (g_mdq_kind == 2 && !g_mdq_hold && SDL_DOSMidiDeferCapture(2, 0, byte)) {
++        dos_port_mpu_write_count++;
++        return;
++    }
+ 
+     /* DOSKUTSU patch (SDL/0096): WB MIDI byte-dispatch witness. One atomic
+        32-bit increment per dispatched byte (any transport). Read main-line by
+@@ -950,7 +970,7 @@ static const struct {
+     { 0x112, 0x115, 0x100 + 8 },
+ };
+ 
+-bool SDL_DOSOpl3Detect(void)
++static bool Opl3Detect_Impl(void)
+ {
+     /* Standard Adlib detection: timer-1 rollover sequence.
+        1. Reset both timers (0x60 to register 0x04).
+@@ -977,6 +997,11 @@ void SDL_DOSOpl3WriteRegister(uint16_t reg, uint8_t value)
+ {
+     /* Bank routing: registers 0x000-0x0FF -> primary bank (0x388/0x389);
+        0x100-0x1FF -> secondary bank (0x38A/0x38B). */
++    /* DOS-PORT patch 0144: when the port has deferred OPL writes to the SB
++       ISR, queue this one for its stamped IRQ instead of writing it now. */
++    if (g_mdq_kind == 1 && !g_mdq_hold && SDL_DOSMidiDeferCapture(1, reg, value)) {
++        return;
++    }
+     const Uint16 addr_port = (reg < 0x100) ? 0x388 : 0x38A;
+     const Uint16 data_port = (reg < 0x100) ? 0x389 : 0x38B;
+ 
+@@ -1096,7 +1121,7 @@ void SDL_DOSOpl3VoiceNoteOff(int voice_id)
+     SDL_DOSOpl3WriteRegister((uint16_t)(0xB0 + ch), 0x00);
+ }
+ 
+-void SDL_DOSOpl3InitChip(void)
++static void Opl3InitChip_Impl(void)
+ {
+     /* Enable OPL3 mode: bit 0 of register 0x105 (secondary bank).
+        This unlocks the secondary register set + 18-voice mode. */
+@@ -1113,7 +1138,7 @@ void SDL_DOSOpl3InitChip(void)
+     }
+ }
+ 
+-void SDL_DOSOpl3Shutdown(void)
++static void Opl3Shutdown_Impl(void)
+ {
+     /* DOSKUTSU patch (Phase 11 patch 0079, OPL3 wub-wub fix part B):
+        zero TL (total level, reg 0x40+op) on both operators of all 18
+@@ -2113,3 +2138,34 @@ void SDL_DOSAudioInitTimer(void)
+ }
+ 
+ #endif /* SDL_PLATFORM_DOS */
++
++/* DOS-PORT patch 0144: chip detection, init and shutdown must reach the chip
++   NOW, even while the port has deferred OPL writes to the SB ISR (a new song
++   can open the sink while the previous one's writes are still queued). While
++   they run, the deferral is HELD: their own writes bypass the capture, and the
++   ISR writes nothing (queued entries simply wait), so the ISR cannot interleave
++   its address/data writes with theirs -- even when Detect's SDL_DelayPrecise
++   yields and the iret of the thread switch re-enables interrupts. With
++   deferral off -- every port that never enables it -- they run exactly as
++   before. */
++bool SDL_DOSOpl3Detect(void)
++{
++    const bool held = SDL_DOSMidiDeferHold(true);
++    const bool r = Opl3Detect_Impl();
++    if (held) SDL_DOSMidiDeferHold(false);
++    return r;
++}
++
++void SDL_DOSOpl3InitChip(void)
++{
++    const bool held = SDL_DOSMidiDeferHold(true);
++    Opl3InitChip_Impl();
++    if (held) SDL_DOSMidiDeferHold(false);
++}
++
++void SDL_DOSOpl3Shutdown(void)
++{
++    const bool held = SDL_DOSMidiDeferHold(true);
++    Opl3Shutdown_Impl();
++    if (held) SDL_DOSMidiDeferHold(false);
++}
+diff --git a/src/core/dos/SDL_dos_audio_synth.h b/src/core/dos/SDL_dos_audio_synth.h
+index 548680157..ec110e1d9 100644
+--- a/src/core/dos/SDL_dos_audio_synth.h
++++ b/src/core/dos/SDL_dos_audio_synth.h
+@@ -129,6 +129,20 @@ extern void SDL_DOSAudioSB_DSPMidiEnterUART(void);
+ // writes per MIDI byte; ~us per write on Pentium.
+ extern void SDL_DOSAudioSB_DSPMidiWriteByte(uint8_t byte);
+ 
++/* DOS-PORT patch 0144: deferred MIDI port writes (SDL_dosaudio_sb.c;
++   public API in SDL_dosmidi_tick.h). Capture is called by the two write
++   primitives; kind 1 = OPL register, 2 = MPU-401 byte. */
++extern bool SDL_DOSMidiDeferCapture(Uint8 kind, Uint16 reg, Uint8 val);
++extern bool SDL_DOSMpu401BlindDirectBase(Uint16 *out_base);
++/* Hold: while true the ISR writes nothing and capture refuses (writes go
++   direct). Hold(true) returns false and does nothing when deferral is off. */
++extern bool SDL_DOSMidiDeferHold(bool hold);
++/* The two flags the write primitives test inline; locked at OpenDevice
++   because a port's own ISR (doskutsu's SDL/0072 tick) can reach the OPL/MPU
++   write primitives. */
++extern volatile Uint8 g_mdq_kind;
++extern volatile Uint8 g_mdq_hold;
++
+ /* ------------------------------------------------------------------------
+  * OPL3 (YMF262) -- sec. D of design doc
+  * ------------------------------------------------------------------------
+-- 
+2.47.3
+

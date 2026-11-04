@@ -1,0 +1,13 @@
+# dos/vendor/sources.manifest -- pinned upstream sources for the DOS build.
+# Format: <name>  <url>  <ref>  <sha>   (see .sdl-dos-ports/docs/patch-conventions.md)
+#
+# SDL3: the pin the hub's sdl3-dos patch series was built against (same as
+# dossage's and dosags's manifests). Patches: dos/patches/SDL/ (seeded from
+# the hub's shared/patches/sdl3-dos/ at bc4a45a, owned here from now on).
+SDL            https://github.com/libsdl-org/SDL.git             main             74a746281f2208e07a7680560fcb7ec57565228e
+
+# NOTE: no SDL_mixer and no SDL_image. linuxdoom-1.10 has no music, and its
+# sound effects go to a raw SDL3 audio stream (engines/og/platform/
+# i_audio_sdl.c). The engine itself is NOT vendored here: it is the og
+# engine of psdoom-plus (engines/og/UPSTREAM: id-Software/DOOM a77dfb9 plus
+# engines/og/patches/), fetched with tools/psdev fetch og.

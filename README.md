@@ -8,7 +8,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 
 | Engine | Status |
 |---|---|
-| og (id's linuxdoom-1.10 + SDL3) | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
+| og (id's linuxdoom-1.10 + SDL3) | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku; MS-DOS (TSRs and drivers, DOSBox-X tested) |
 | Chocolate Doom 3.1.1, Crispy Doom 7.2 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | Woof! 16.0.0, DSDA-Doom 0.30.1 | **playable**: Linux, FreeBSD, Haiku |
@@ -25,7 +25,9 @@ work unchanged.
 
 The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux, FreeBSD, OpenBSD, NetBSD and
 Haiku today, and so do Chocolate Doom and Crispy Doom; GZDoom, UZDoom, Woof! and DSDA-Doom play
-on Linux, FreeBSD and Haiku. See [PLAN.md](PLAN.md) for the design and the phases.
+on Linux, FreeBSD and Haiku. og also runs on MS-DOS, where the monsters are the resident programs
+and drivers in DOS memory ([dos/](dos/README.md)). See [PLAN.md](PLAN.md) for the design and the
+phases.
 
 ```sh
 tools/psdev build og                       # fetch id's source, apply engines/og/patches, build
@@ -49,6 +51,8 @@ tools/psdev build woof                     # or dsda: build/woof/psdoom-woof
 | `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
 | `engines/<engine>/` | other engines: `UPSTREAM` pin and `patches/`; the source is fetched into `src/` |
 | `engines/common/` | glue shared by the Doom-family engines (`psdoom/`) and by GZDoom/UZDoom (`zdoom/`, ZScript) |
+| `dos/` | the MS-DOS build of og (DJGPP + SDL3-DOS), the `mcb` backend's tools and tests ([README](dos/README.md)) |
+| `.sdl-dos-ports/` | the sdl-dos-ports hub's shared DOS layer (git subtree; don't edit here) |
 | `tests/vm/` | guest bootstrap and end-to-end tests (`tools/psdev test og --vm debian`) |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |
 

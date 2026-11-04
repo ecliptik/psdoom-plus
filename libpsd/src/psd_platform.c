@@ -4,7 +4,7 @@
  * Copyright (C) 2026 psdoom-plus contributors
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
-#if !defined(_POSIX_C_SOURCE) && !defined(__HAIKU__)
+#if !defined(_POSIX_C_SOURCE) && !defined(__HAIKU__) && !defined(__DJGPP__)
 #define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -22,7 +22,16 @@
 
 long long psd_platform_now_ms(void)
 {
-#if defined(CLOCK_MONOTONIC)
+#if defined(__DJGPP__)
+	/* the clock SDL3-DOS uses too: PIT-based, microsecond-ish, but it can
+	 * step back a BIOS tick (55 ms) when one lands between its two reads */
+	static long long last;
+	long long now = (long long)uclock() * 1000 / UCLOCKS_PER_SEC;
+
+	if (now > last)
+		last = now;
+	return last;
+#elif defined(CLOCK_MONOTONIC)
 	struct timespec ts;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
@@ -47,6 +56,10 @@ const char *psd_platform_whoami(void)
 		if (v != NULL && v[0] != '\0')
 			return v;
 	}
+#ifdef __DJGPP__
+	(void)pw;
+	return "dos";                /* one user, and it is you */
+#endif
 	pw = getpwuid(geteuid());
 	if (pw != NULL && pw->pw_name != NULL) {
 		psd_strlcpy(buf, pw->pw_name, sizeof buf);
@@ -58,6 +71,14 @@ const char *psd_platform_whoami(void)
 static int xdg_path(char *buf, size_t len, const char *xdg_var,
                     const char *home_rel, const char *leaf)
 {
+#ifdef __DJGPP__
+	/* DOS: next to the game, in 8.3 names (psdoom.conf -> psd.cfg) */
+	(void)xdg_var;
+	(void)home_rel;
+	psd_strlcpy(buf, strcmp(leaf, "psdoom.conf") == 0 ? "psd.cfg" :
+	                 strcmp(leaf, "actions.log") == 0 ? "psd.log" : leaf, len);
+	return PSD_OK;
+#endif
 	const char *base = getenv(xdg_var);
 	int n;
 
@@ -110,6 +131,13 @@ void psd_platform_timestamp(char *buf, size_t len)
 	time_t t = time(NULL);
 	struct tm tm;
 
-	if (localtime_r(&t, &tm) == NULL || strftime(buf, len, "%Y-%m-%dT%H:%M:%S%z", &tm) == 0)
+#ifdef __DJGPP__
+	/* DOS has no time zones (TZ is usually unset): local time, no offset */
+	const char *fmt = "%Y-%m-%dT%H:%M:%S";
+#else
+	const char *fmt = "%Y-%m-%dT%H:%M:%S%z";
+#endif
+
+	if (localtime_r(&t, &tm) == NULL || strftime(buf, len, fmt, &tm) == 0)
 		psd_strlcpy(buf, "?", len);
 }

@@ -87,10 +87,21 @@ static long long	test_last_ms, test_max_gap;	// longest wall-clock gap between t
 
 static long long now_ms (void)
 {
+#if defined(__DJGPP__)
+    // the clock SDL3-DOS uses too (no clock_gettime on DOS); uclock() can
+    // step back a BIOS tick, so keep it monotonic
+    static long long last;
+    long long now = (long long)uclock () * 1000 / UCLOCKS_PER_SEC;
+
+    if (now > last)
+	last = now;
+    return last;
+#else
     struct timespec ts;
 
     clock_gettime (CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#endif
 }
 
 static char	msgbuf[80];

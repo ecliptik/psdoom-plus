@@ -316,6 +316,18 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 7. **DOS (og)**: the SDL3 backend under DJGPP via the hub's `shared/` layer, the `mcb` backend, then
    `psdoomd` + the `net` backend. *Exit:* in DOSBox-X, shooting a TSR frees it and shooting a remote
    monster kills a `sleep` in a tv-\* guest; then the same on a real-hardware rig.
+   - ✅ **og + `mcb` in DOSBox-X** (2026-11-04): hub claimed (`ports.yaml` `psdoom-plus`), hub
+     subtree at `.sdl-dos-ports/`, `dos/` is the port root (SDL3 pin + the SDL3-DOS series,
+     CWSDPMI r7 fetched by sha256). og patch 0007 (`#ifdef __DJGPP__`): no sockets, `I_GetTime` from
+     SDL kept monotonic (uclock() steps back a BIOS tick, which hung the screen wipe), binary
+     `_fmode`, config/saves in the current directory, 8 MB zone (`-mb`). og's video gained an
+     8-bit window-surface path (VGA mode 13h on DOS, `-swsurface` elsewhere). libpsd
+     `backend_dos.c` walks the MCB chain (UMBs linked) and the SD sub-blocks; kill frees the
+     owner's blocks or unlinks a driver from the device chain; modern protects our PSP chain,
+     CWSDPMI, interrupt-hooked blocks and linked drivers, and DOS shows them as invulnerable.
+     `dos/tests/dosbox-pstest.sh`: 10/10 (two TSRs and an INT 60h hooker, classic and modern,
+     checked with `PSDPS.EXE`, the MCB chain as libpsd sees it). Not yet: device drivers under a
+     real CONFIG.SYS (DOSBox-X loads none), `net` + `psdoomd`, real hardware.
 8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
    per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random
    signatures, DSDA's `dboolean` and argv, its messenger) and hook scripts

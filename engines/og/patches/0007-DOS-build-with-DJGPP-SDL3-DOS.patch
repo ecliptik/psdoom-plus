@@ -1,0 +1,220 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 4 Nov 2026 08:21:09 -0800
+Subject: [PATCH 7/7] DOS: build with DJGPP (SDL3-DOS)
+
+- i_net.c: DJGPP has no BSD sockets; single player only (-net errors)
+- i_system.c: I_GetTime from SDL_GetTicks (DJGPP's gettimeofday moves
+  with the 18.2 Hz BIOS tick), kept monotonic: uclock() underneath can
+  step back one BIOS tick, and a negative tic count hangs the screen
+  wipe; 8 MB zone by default, -mb <n> anywhere
+- i_main.c: binary file mode (_fmode), unbuffered stdout, and
+  PSDOOM_STDERR=<file> (COMMAND.COM cannot redirect stderr)
+- d_main.c: config (psdoom.cfg) and savegames in the current directory;
+  FREEDOOM.WAD as the 8.3 name for Freedoom
+- i_sound.c: SA_RESTART fallback (only the SNDINTR timer uses it)
+---
+ linuxdoom-1.10/d_main.c   | 13 +++++++++++++
+ linuxdoom-1.10/i_main.c   | 15 +++++++++++++++
+ linuxdoom-1.10/i_net.c    | 32 ++++++++++++++++++++++++++++++++
+ linuxdoom-1.10/i_sound.c  |  5 +++++
+ linuxdoom-1.10/i_system.c | 23 +++++++++++++++++++++++
+ 5 files changed, 88 insertions(+)
+
+diff --git a/linuxdoom-1.10/d_main.c b/linuxdoom-1.10/d_main.c
+index 1bb1fde..82fe662 100644
+--- a/linuxdoom-1.10/d_main.c
++++ b/linuxdoom-1.10/d_main.c
+@@ -627,7 +627,12 @@ static boolean D_FindFreedoom (char* waddir)
+     char*	dirs[] = { waddir, "/usr/share/games/doom", "/usr/local/share/games/doom",
+ 			   "/usr/local/share/doom", "/usr/pkg/share/doom",
+ 			   "/boot/system/data/doom", NULL };
++#ifdef __DJGPP__
++    // 8.3 names: FREEDOOM.WAD is whichever of the two the user copied in
++    char*	names[] = { "freedoom2.wad", "freedoom1.wad", "freedoom.wad", NULL };
++#else
+     char*	names[] = { "freedoom2.wad", "freedoom1.wad", NULL };
++#endif
+     char	path[1024];
+     int		d, n;
+ 
+@@ -700,12 +705,20 @@ void IdentifyVersion (void)
+     doom2fwad = malloc(strlen(doomwaddir)+1+10+1);
+     sprintf(doom2fwad, "%s/doom2f.wad", doomwaddir);
+ 
++#ifdef __DJGPP__
++    // psdoom-plus: DOS keeps the config and savegames in the current
++    // directory, as DOS Doom did
++    (void) home;
++    snprintf (basedefault, sizeof basedefault, "psdoom.cfg");
++    savedir[0] = 0;
++#else
+     home = getenv("HOME");
+     if (!home)
+       I_Error("Please set $HOME to your home directory");
+     // psdoom-plus: XDG config and data directories instead of ~/.doomrc
+     D_XdgPath (basedefault, sizeof basedefault, "XDG_CONFIG_HOME", ".config", "og.cfg");
+     D_XdgPath (savedir, sizeof savedir, "XDG_DATA_HOME", ".local/share", "og/");
++#endif
+ #endif
+ 
+     {
+diff --git a/linuxdoom-1.10/i_main.c b/linuxdoom-1.10/i_main.c
+index e189e78..1583de6 100644
+--- a/linuxdoom-1.10/i_main.c
++++ b/linuxdoom-1.10/i_main.c
+@@ -29,6 +29,13 @@ rcsid[] = "$Id: i_main.c,v 1.4 1997/02/03 22:45:10 b1 Exp $";
+ #include "doomdef.h"
+ 
+ #include "m_argv.h"
++
++#ifdef __DJGPP__
++#include <stdio.h>
++#include <stdlib.h>
++#include <fcntl.h>
++#include <io.h>
++#endif
+ #include "d_main.h"
+ 
+ int
+@@ -36,6 +43,14 @@ main
+ ( int		argc,
+   char**	argv ) 
+ { 
++#ifdef __DJGPP__
++    _fmode = O_BINARY;	// psdoom-plus: WADs, demos and saves are binary
++    setvbuf (stdout, NULL, _IONBF, 0);	// a crash must not eat the log
++    // COMMAND.COM cannot redirect stderr: PSDOOM_STDERR=file does it
++    // (I_Error messages and DJGPP's crash traceback land there)
++    if (getenv ("PSDOOM_STDERR"))
++	freopen (getenv ("PSDOOM_STDERR"), "w", stderr);
++#endif
+     myargc = argc; 
+     myargv = argv; 
+  
+diff --git a/linuxdoom-1.10/i_net.c b/linuxdoom-1.10/i_net.c
+index 1970537..cdd649f 100644
+--- a/linuxdoom-1.10/i_net.c
++++ b/linuxdoom-1.10/i_net.c
+@@ -27,6 +27,37 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
+ #include <string.h>
+ #include <stdio.h>
+ 
++// psdoom-plus: DJGPP has no BSD sockets (Watt-32 would provide them);
++// the DOS build is single player only.
++#ifdef __DJGPP__
++#include "i_system.h"
++#include "d_event.h"
++#include "d_net.h"
++#include "m_argv.h"
++#include "doomstat.h"
++#include "i_net.h"
++
++void I_InitNetwork (void)
++{
++    if (M_CheckParm ("-net"))
++	I_Error ("I_InitNetwork: no network play in the DOS build");
++    doomcom = malloc (sizeof (*doomcom));
++    memset (doomcom, 0, sizeof (*doomcom));
++    doomcom->ticdup = 1;
++    doomcom->extratics = M_CheckParm ("-extratic") ? 1 : 0;
++    netgame = false;
++    doomcom->id = DOOMCOM_ID;
++    doomcom->numplayers = doomcom->numnodes = 1;
++    doomcom->deathmatch = false;
++    doomcom->consoleplayer = 0;
++}
++
++void I_NetCmd (void)
++{
++    I_Error ("Bad net cmd: %i\n", doomcom->command);
++}
++#else /* !__DJGPP__ */
++
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+@@ -351,3 +382,4 @@ void I_NetCmd (void)
+ 	I_Error ("Bad net cmd: %i\n",doomcom->command);
+ }
+ 
++#endif /* !__DJGPP__ */
+diff --git a/linuxdoom-1.10/i_sound.c b/linuxdoom-1.10/i_sound.c
+index f6c0a1e..97c6eaa 100644
+--- a/linuxdoom-1.10/i_sound.c
++++ b/linuxdoom-1.10/i_sound.c
+@@ -43,6 +43,11 @@ rcsid[] = "$Id: i_unix.c,v 1.5 1997/02/03 22:45:10 b1 Exp $";
+ #include <time.h>
+ #include <signal.h>
+ 
++// psdoom-plus: DJGPP has sigaction but no SA_RESTART (SNDINTR only)
++#ifndef SA_RESTART
++#define SA_RESTART 0
++#endif
++
+ #include "z_zone.h"
+ 
+ #include "i_system.h"
+diff --git a/linuxdoom-1.10/i_system.c b/linuxdoom-1.10/i_system.c
+index 46749d2..5f60ebc 100644
+--- a/linuxdoom-1.10/i_system.c
++++ b/linuxdoom-1.10/i_system.c
+@@ -34,6 +34,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
+ 
+ #include "doomdef.h"
+ #include "m_misc.h"
++#include "m_argv.h"
+ #include "i_video.h"
+ #include "i_sound.h"
+ 
+@@ -48,7 +49,12 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
+ 
+ 
+ 
++#ifdef __DJGPP__
++int	mb_used = 8;	// psdoom-plus: DOS PCs have 8-32 MB; -mb <n> overrides
++#include <SDL3/SDL.h>
++#else
+ int	mb_used = 32;	// psdoom-plus: room for modern IWADs/PWADs
++#endif
+ 
+ 
+ void
+@@ -75,6 +81,10 @@ int  I_GetHeapSize (void)
+ 
+ byte* I_ZoneBase (int*	size)
+ {
++    int p = M_CheckParm ("-mb");
++
++    if (p && p < myargc-1 && atoi (myargv[p+1]) > 0)
++	mb_used = atoi (myargv[p+1]);
+     *size = mb_used*1024*1024;
+     return (byte *) malloc (*size);
+ }
+@@ -87,6 +97,18 @@ byte* I_ZoneBase (int*	size)
+ //
+ int  I_GetTime (void)
+ {
++#ifdef __DJGPP__
++    // psdoom-plus: DJGPP's gettimeofday only moves with the 18.2 Hz BIOS
++    // tick; SDL3-DOS has a millisecond clock. It comes from uclock(), which
++    // can step back one BIOS tick (55 ms) when the tick lands between its
++    // two reads; a negative tic count hangs the screen wipe, so never go back.
++    static int last;
++    int now = (int) (SDL_GetTicks () * TICRATE / 1000);
++
++    if (now > last)
++	last = now;
++    return last;
++#else
+     struct timeval	tp;
+     struct timezone	tzp;
+     int			newtics;
+@@ -97,6 +119,7 @@ int  I_GetTime (void)
+ 	basetime = tp.tv_sec;
+     newtics = (tp.tv_sec-basetime)*TICRATE + tp.tv_usec*TICRATE/1000000;
+     return newtics;
++#endif
+ }
+ 
+ 

@@ -1,0 +1,81 @@
+From 7b62e17797fbcc0ba90af8bce39d1f36fc532b0d Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <services.claude@accounts.ecliptik.com>
+Date: Wed, 26 Aug 2026 21:38:08 -0700
+Subject: [PATCH] dos: patch 0134 -- one-time VBE 4F06 Get Scan Line Length
+ probe
+
+Piggybacked on SDL_HINT_DOS_BANK_CHUNK_PROBE activation, same as
+SDL/0132 and SDL/0133. Calls INT 10h AX=4F06h BL=01h (VBE Get Logical
+Scan Line Length) once and logs BytesPerScanLine/PixelsPerScanLine/
+MaxScanLines from the BIOS directly beside fb_state.vram_pitch.
+
+Why not just trust SDL/0133's CRTC[0x13] dump: that register's
+documented convention (actual_stride = CRTC13 * 2) is a generic VGA
+byte-mode default, not a guarantee -- some chips extend or reinterpret
+it, so a mismatch there is ambiguous without knowing this chip's exact
+multiplier. VBE function 4F06 is a standardized BIOS abstraction every
+VBE-conformant card must implement; its Get subfunction reports the
+BIOS's own understanding of BytesPerScanLine with no interpretation
+required on our end. This backend's mode-set path (SDL_dosmodes.c)
+currently takes BytesPerScanLine from the 4F01 GetModeInfo call at
+mode-set time and never calls 4F06 (Set or Get) to reconfirm it -- if
+the BIOS's own Get answer disagrees with that cached value, that is a
+BIOS-internal inconsistency independent of both the CPU-bus readback
+question (SDL/0128-0131) and the raw-register ambiguity (SDL/0133).
+
+Read-only: BL=01h is the Get subfunction, no hardware state changes.
+
+Verified via isolated standalone compile with stub dpmi/log functions
+(gcc -Wall -Wextra -Werror, zero warnings) before generating this
+patch, per this repo's patch-authoring convention.
+---
+ src/video/dos/SDL_dosframebuffer.c | 33 ++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/src/video/dos/SDL_dosframebuffer.c b/src/video/dos/SDL_dosframebuffer.c
+index 05ef458af..6460a2602 100644
+--- a/src/video/dos/SDL_dosframebuffer.c
++++ b/src/video/dos/SDL_dosframebuffer.c
+@@ -1305,6 +1305,39 @@ static void dos_bank_chunk_probe_resolve(void)
+             "backend's mode-set path)",
+             crtc13, (unsigned)crtc13 * 2, fb_state.vram_pitch);
+     }
++
++    // SDL/0134: one-time VBE function 4F06h Get Scan Line Length call
++    // (BL=01h), piggybacked on the same probe activation as SDL/0132-0133.
++    // Unlike SDL/0133's raw CRTC[0x13] read, this is a standardized VESA
++    // BIOS service every card's VBE implementation must answer -- no
++    // chip-specific multiplier guessing required, since the BIOS itself
++    // reports BytesPerScanLine in BX directly. This backend's mode-set
++    // path (SDL_dosmodes.c) calls neither the Set nor the Get subfunction
++    // of 4F06 -- it takes BytesPerScanLine from the earlier 4F01
++    // GetModeInfo call at mode-set time and never asks the BIOS to
++    // reconfirm it. If the BIOS's *own* Get answer here disagrees with
++    // that GetModeInfo-derived fb_state.vram_pitch, that is a
++    // BIOS-internal inconsistency independent of both the CPU-bus
++    // readback question (SDL/0128-0131) and the raw-CRTC-register
++    // multiplier ambiguity (SDL/0133) -- a definitive answer rather than
++    // another data point requiring interpretation. Read-only: BL=01h is
++    // the Get subfunction, no hardware state is modified by this call.
++    {
++        __dpmi_regs regs;
++        SDL_zero(regs);
++        regs.x.ax = 0x4F06;
++        regs.x.bx = 0x0001;
++        __dpmi_int(0x10, &regs);
++        dos_port_dbg_log(
++            "sdl: SDL/0134 VBE-4F06-GET-SCANLINE (read-only, INT 10h "
++            "AX=4F06h BL=01h) status=0x%04x BytesPerScanLine=%u "
++            "PixelsPerScanLine=%u MaxScanLines=%u vs vram_pitch=%d "
++            "(BIOS-declared BytesPerScanLine from the earlier 4F01 "
++            "GetModeInfo call at mode-set time, never reconfirmed "
++            "against this Get call by this backend's mode-set path)",
++            regs.x.ax, regs.x.bx, regs.x.cx, regs.x.dx,
++            fb_state.vram_pitch);
++    }
+ }
+ 
+ static void dos_bank_chunk_probe_maybe_log(const Uint8 *src, Uint32 src_off,
+-- 
+2.47.3
+

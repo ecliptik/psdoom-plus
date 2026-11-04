@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:04:44 -0800
-Subject: [PATCH 1/6] Build with modern compilers on 64-bit systems
+Subject: [PATCH 1/7] Build with modern compilers on 64-bit systems
 
 - boolean: stay int-sized when stdbool.h is already included (SDL3)
 - doomtype.h: stdint/stddef, alloca via __builtin_alloca; no <values.h>

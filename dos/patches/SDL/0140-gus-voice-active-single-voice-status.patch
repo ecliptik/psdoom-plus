@@ -1,0 +1,180 @@
+From 7e2e94fd7c99050d346740d6da6c6cd8779b78b7 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Sun, 13 Sep 2026 16:27:54 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0140 -- SDL_DOSGusVoiceActive,
+ single-voice status without the full scan
+
+WHY DOS NEEDS THIS: SDL_DOSGusGetState() refreshes voice_active_mask by
+looping over EVERY busy GF1 voice on the card (cli/sti-wrapped register
+reads each), correct for a caller that genuinely needs the whole mask
+(gus_sink.c's reap_finished_voices(), called once per note-on). A
+double-buffered PCM stream (gus_pcm_stream.c) only ever cares about ONE
+voice it already owns, but was calling SDL_DOSGusGetState() every single
+pump cycle -- i.e. every rendered frame, for as long as any half-buffer
+is sounding -- paying for a full busy-voice scan to answer a one-voice
+question. Real-hardware measurement (dosags PLAN.md, "S5 GUS perf
+regression finding", 2026-09-13) isolated this as the dominant cost
+behind a ~2-3x whole-run slowdown under combined GUS MIDI+PCM: no other
+backend (SB/OPL3/WaveBlaster) does a per-frame full-hardware-voice-scan
+anywhere in its own path.
+
+SDL_DOSGusVoiceActive(voice) does the identical per-voice hardware read
+and start-race grace-window logic SDL_DOSGusGetState() already applies
+per busy voice -- factored into a shared static gus_voice_check_running()
+so both callers stay on the exact same quirk workaround instead of two
+implementations that could silently diverge -- for exactly one voice, in
+its own short cli/sti section. No mask assembly, no diag audit, no
+was_main bookkeeping: none of that is meaningful for a single-voice
+query. gus_pcm_stream_pump() (shared/audio/, hub-side change, separate
+commit) now calls this instead of SDL_DOSGusGetState().
+---
+ include/SDL3/SDL_dosgus.h        | 25 ++++++++++
+ src/audio/dos/SDL_dosaudio_gus.c | 81 +++++++++++++++++++++++---------
+ 2 files changed, 85 insertions(+), 21 deletions(-)
+
+diff --git a/include/SDL3/SDL_dosgus.h b/include/SDL3/SDL_dosgus.h
+index 99c867916..f63d49213 100644
+--- a/include/SDL3/SDL_dosgus.h
++++ b/include/SDL3/SDL_dosgus.h
+@@ -129,6 +129,31 @@ extern SDL_DECLSPEC void SDLCALL SDL_DOSGusShutdown(void);
+  */
+ extern SDL_DECLSPEC bool SDLCALL SDL_DOSGusGetState(SDL_DOSGusState *out);
+ 
++/**
++ * Cheaply check whether ONE voice is still sounding, without the full
++ * multi-voice scan SDL_DOSGusGetState performs.
++ *
++ * SDL_DOSGusGetState refreshes voice_active_mask by looping over EVERY busy
++ * voice on the card (cli/sti-wrapped register reads each) -- correct for a
++ * caller that genuinely needs the whole mask, but wasteful for a caller that
++ * only cares about one voice it already owns and is willing to call this
++ * every frame (e.g. a double-buffered PCM stream polling for its own
++ * half-buffer to finish). This does the same register read + start-race
++ * grace-window logic SDL_DOSGusGetState applies per-voice, just for the one
++ * voice asked about, with its own (much shorter) cli/sti section.
++ *
++ * \param voice a voice index in [0, num_voices) previously returned by
++ *              SDL_DOSGusAllocVoice/SDL_DOSGusAllocVoiceSfx.
++ * \returns true if the voice is currently allocated AND its hardware
++ *          "stopped" bit reads clear (still sounding, honoring the same
++ *          start-race grace window SDL_DOSGusGetState uses); false if the
++ *          GF1 is inactive, the index is out of range, or the voice is not
++ *          currently busy/sounding.
++ *
++ * \since DOSKUTSU patch SDL/0140.
++ */
++extern SDL_DECLSPEC bool SDLCALL SDL_DOSGusVoiceActive(int voice);
++
+ /**
+  * Upload a sample block into the card's on-board DRAM, VERBATIM.
+  *
+diff --git a/src/audio/dos/SDL_dosaudio_gus.c b/src/audio/dos/SDL_dosaudio_gus.c
+index ed88077d7..00f6e9b82 100644
+--- a/src/audio/dos/SDL_dosaudio_gus.c
++++ b/src/audio/dos/SDL_dosaudio_gus.c
+@@ -1092,6 +1092,38 @@ void SDL_DOSGusShutdown(void)
+     gus_w8(GUS_REG_RESET, 0x00); /* park the chip in reset */
+ }
+ 
++/* Shared by SDL_DOSGusGetState (looping over every busy voice) and
++ * SDL_DOSGusVoiceActive (one voice only, patch SDL/0140) so both stay in
++ * lockstep on the exact same start-race grace-window quirk workaround
++ * instead of two subtly-different reimplementations of it. Caller must
++ * already be inside a cli/sti section and must have already checked
++ * g_gus_active and that `v` is a busy voice. */
++static bool gus_voice_check_running(int v)
++{
++    Uint8 ctrl;
++    int hw_running;
++
++    gus_select_voice(v);
++    ctrl = gus_r8(GUS_VREG_CTRL_RD);
++    ctrl = gus_r8(GUS_VREG_CTRL_RD);
++    hw_running = !(ctrl & 0x01); /* bit0 clear -> still sounding */
++    if (g_gus_reap_grace) {
++        /* gus-8c start-race guard: report a fresh voice ACTIVE until
++           the hw confirms it running once; if it never confirms
++           within the grace window, fall back to the hw bit (no leak). */
++        if (hw_running) {
++            g_gus_voice_confirmed[v] = 1;
++        } else if (!g_gus_voice_confirmed[v] &&
++                   g_gus_voice_polls[v] < GUS_REAP_GRACE_POLLS) {
++            hw_running = 1; /* protect the start-race window */
++        }
++        if (g_gus_voice_polls[v] < 255) {
++            g_gus_voice_polls[v]++;
++        }
++    }
++    return hw_running != 0;
++}
++
+ bool SDL_DOSGusGetState(SDL_DOSGusState *out)
+ {
+     int v;
+@@ -1119,28 +1151,8 @@ bool SDL_DOSGusGetState(SDL_DOSGusState *out)
+         int busy = 0;
+         for (v = 0; v < g_gus_voices; v++) {
+             if (g_gus_voice_busy[v]) {
+-                Uint8 ctrl;
+-                int hw_running;
+                 busy++;
+-                gus_select_voice(v);
+-                ctrl = gus_r8(GUS_VREG_CTRL_RD);
+-                ctrl = gus_r8(GUS_VREG_CTRL_RD);
+-                hw_running = !(ctrl & 0x01); /* bit0 clear -> still sounding */
+-                if (g_gus_reap_grace) {
+-                    /* gus-8c start-race guard: report a fresh voice ACTIVE until
+-                       the hw confirms it running once; if it never confirms
+-                       within the grace window, fall back to the hw bit (no leak). */
+-                    if (hw_running) {
+-                        g_gus_voice_confirmed[v] = 1;
+-                    } else if (!g_gus_voice_confirmed[v] &&
+-                               g_gus_voice_polls[v] < GUS_REAP_GRACE_POLLS) {
+-                        hw_running = 1; /* protect the start-race window */
+-                    }
+-                    if (g_gus_voice_polls[v] < 255) {
+-                        g_gus_voice_polls[v]++;
+-                    }
+-                }
+-                if (hw_running) {
++                if (gus_voice_check_running(v)) {
+                     mask |= (1u << v);
+                 }
+             }
+@@ -1180,6 +1192,33 @@ bool SDL_DOSGusGetState(SDL_DOSGusState *out)
+     return true;
+ }
+ 
++/* patch SDL/0140: a caller that already owns one specific voice (e.g. a
++ * double-buffered PCM stream polling every pump cycle for its own
++ * half-buffer to finish) does not need SDL_DOSGusGetState's full scan over
++ * EVERY busy voice on the card -- that scan is O(busy voices) cli/sti-
++ * wrapped register reads, paid every call regardless of how many voices the
++ * caller actually cares about. This does the exact same per-voice hardware
++ * read + start-race grace logic (gus_voice_check_running, shared with
++ * SDL_DOSGusGetState above so the quirk workaround never diverges between
++ * the two), for just the one voice asked about, in its own short cli/sti
++ * section. No diag audit, no mask assembly, no was_main bookkeeping -- none
++ * of that is meaningful for a single-voice query. */
++bool SDL_DOSGusVoiceActive(int voice)
++{
++    bool running;
++
++    if (!g_gus_active || voice < 0 || voice >= g_gus_voices) {
++        return false;
++    }
++    if (!g_gus_voice_busy[voice]) {
++        return false;
++    }
++    DOS_DisableInterrupts();
++    running = gus_voice_check_running(voice);
++    DOS_EnableInterrupts();
++    return running;
++}
++
+ /* patch 0139: the actual transfer dispatch, factored out of
+    SDL_DOSGusUploadSample so SDL_DOSGusOverwriteSample can reuse it against a
+    CALLER-CHOSEN address instead of a freshly bump-allocated one. Changes
+-- 
+2.47.3
+

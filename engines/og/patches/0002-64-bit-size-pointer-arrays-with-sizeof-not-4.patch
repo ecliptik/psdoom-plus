@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:07:07 -0800
-Subject: [PATCH 2/6] 64-bit: size pointer arrays with sizeof, not 4
+Subject: [PATCH 2/7] 64-bit: size pointer arrays with sizeof, not 4
 
 r_data.c allocated its texture/flat/sprite tables (several of them
 arrays of pointers) as count*4 bytes, and p_setup.c did the same for the

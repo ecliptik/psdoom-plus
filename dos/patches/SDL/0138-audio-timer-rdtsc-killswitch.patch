@@ -1,0 +1,154 @@
+From 5a01e4d0674e337700d79e29038028f08a58f5bf Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Thu, 3 Sep 2026 15:08:59 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0138 -- RDTSC killswitch for the
+ SDL/0039 audio IRQ timer
+
+WHY DOS NEEDS THIS: on 2026-09-03 the vcctrl rig (Gateway 2000 g2k,
+Pentium OverDrive 83, MS-DOS 6.22, EMM386 NOEMS in every boot profile)
+hard-hung on the first RDTSC executed by a real-mode program running as
+a V86 task under EMM386 -- twice in dinspect (a 16-bit Open Watcom
+hardware-inventory tool) and independently in HWiNFO for DOS the same
+day. The instruction never returns; interrupts keep being serviced
+(keyboard LEDs respond) but there is no forward progress, Ctrl-Alt-Del
+does nothing, and only a power cycle recovers. CPUID under the same
+EMM386 is fine. The OverDrive is the only CPU in the rig's matrix with a
+TSC, so every 486-class run passes by never executing the instruction.
+
+SDL/0039 executes RDTSC at OpenDevice (a 10 ms calibration spin) and
+then inside every Sound Blaster IRQ -- but from a ring-3 DPMI client of
+CWSDPMI, which under EMM386 hosts itself via VCPI with its own GDT/IDT:
+a different execution context from a V86 task. On the SAME rig, CPU and
+EMM386 line that context has run RDTSC for whole QA sessions without a
+hang: every per-cell SDL log under doskutsu's
+qa-results/2026-08-13-r2-POD83 reads "audio IRQ timer: RDTSC
+(Pentium-class detected, 83 cycles/us ~= 83 MHz)" (cpu-witness family 5
+model 3 stepping 2; UNIVBE boot profile, EMM386 NOEMS). So this patch
+does NOT change the default and does NOT add an automatic guard. It adds
+a runtime killswitch, SDL_HINT_DOS_AUDIO_TIMER_RDTSC=0 (strict-"0",
+series idiom), that selects the 8253 PIT path unconditionally and logs
+"audio IRQ timer: 8253 PIT counter 0 (RDTSC disabled via
+SDL_HINT_DOS_AUDIO_TIMER_RDTSC=0; ~838 ns/tick)" -- so a port can
+un-wedge itself, or A/B the PIT path on Pentium-class hardware, without
+a rebuild if some other CPU / memory-manager pairing turns out to trap
+RDTSC from a DPMI client as well. The PIT path costs only telemetry
+resolution (~838 ns vs ~12 ns per tick) and is what every 486-class
+result was measured with.
+
+Why not an automatic guard: dinspect's fix (read CR0 via SMSW; PE set
+while a "real-mode" program runs means a V86 monitor is underneath) is
+the right test for real-mode code and the wrong one here -- a DPMI
+client is always in protected mode, PE is always set, and the guard
+would disable RDTSC everywhere including DOSBox-X. DPMI 0400h's
+"returns to real mode for reflected interrupts" flag (BX bit 1) is no
+better: CWSDPMI hardcodes BX to 1 or 5 (exphdlr.c, case 0x0400:
+dalloc_max_size() ? 5 : 1), so it reports V86 whether or not a monitor
+is loaded. VCPI presence (INT 67h AX=DE00h) is the only real signal and
+is deliberately not consulted, because the evidence says this context
+does not need it. The mechanism of the V86-mode hang is not identified
+(EMM386 reflecting an opcode it cannot emulate, or something specific
+to the OverDrive); this patch claims nothing about it.
+
+Verified under DOSBox-X (hub shared/tools/dosbox-run.sh, a scratch
+audio-open probe that reads g_dos_audio_timer_mode after OpenDevice):
+  cputype=pentium_slow (the hub's parity + fast configs): CPUID leaf 1
+    reports eax=0x402 edx=0x009 -- family 4, NO TSC bit -- so the 0039
+    auto-detect has always landed on the PIT there ("486-class
+    fallback" banner) and DOSBox-X in that config cannot exercise the
+    RDTSC branch at all. Hint unset -> PIT (unchanged); hint=0 -> PIT
+    with the new killswitch banner.
+  cputype=pentium (scratch copy of the config): CPUID reports
+    eax=0x517 edx=0x139 with the TSC bit set. Hint unset -> RDTSC
+    (40 cycles/us); hint=1 -> RDTSC; hint=0 -> PIT with the killswitch
+    banner.
+Real-hardware A/B of the killswitch on the OverDrive is a vcctrl item,
+not done here. Full record: docs/timing.md in the sdl-dos-ports hub.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016YSUWgCeqURNnDY82RZVKS
+---
+ src/core/dos/SDL_dos_audio_synth.c | 46 ++++++++++++++++++++++++++++++
+ src/core/dos/SDL_dos_audio_synth.h | 10 +++++++
+ 2 files changed, 56 insertions(+)
+
+diff --git a/src/core/dos/SDL_dos_audio_synth.c b/src/core/dos/SDL_dos_audio_synth.c
+index c2f95f9f2..0a6893e9b 100644
+--- a/src/core/dos/SDL_dos_audio_synth.c
++++ b/src/core/dos/SDL_dos_audio_synth.c
+@@ -2031,6 +2031,52 @@ static uint32_t calibrate_tsc_cycles_per_us(void)
+ 
+ void SDL_DOSAudioInitTimer(void)
+ {
++    /* SDL/0138: runtime killswitch for the RDTSC path. Strict-"0" match
++       (series idiom): only the literal string "0" disables; unset / empty
++       / "1" / anything else keeps the 0039 auto-detect below.
++
++       Why a killswitch and not an automatic guard: on 2026-09-03 the
++       vcctrl rig (Gateway 2000, Pentium OverDrive 83, MS-DOS 6.22, EMM386
++       NOEMS in every boot profile) hard-hung on the first RDTSC executed
++       by a REAL-MODE program running as a V86 task under EMM386 (dinspect,
++       twice; HWiNFO for DOS the same day): the instruction never returns,
++       interrupts are still serviced (keyboard LEDs respond) but there is
++       no forward progress, Ctrl-Alt-Del is dead, only a power cycle
++       recovers. This backend's RDTSC runs in a different context -- a
++       ring-3 DPMI client of CWSDPMI, which under EMM386 hosts itself via
++       VCPI with its own GDT/IDT -- and on the SAME rig, CPU and EMM386
++       line it has executed RDTSC at calibration and inside every audio
++       IRQ for whole QA sessions without a hang (every per-cell SDL log
++       under doskutsu's qa-results/2026-08-13-r2-POD83 reads "audio IRQ
++       timer: RDTSC (Pentium-class detected, 83 cycles/us ~= 83 MHz)";
++       cpu-witness family 5 model 3 stepping 2). So the default stays
++       RDTSC-when-TSC-present; the
++       killswitch exists so a port can un-wedge itself, or A/B the PIT
++       path on Pentium-class hardware, without a rebuild if some other
++       CPU / memory-manager pairing traps RDTSC from a DPMI client too.
++
++       Why the obvious automatic guards do not work from here:
++         - dinspect's fix (read CR0 via SMSW; PE set while a "real-mode"
++           program runs means a V86 monitor is underneath) is correct for
++           real-mode code and meaningless in a DPMI client: PE is always
++           set in protected mode, so it would disable RDTSC everywhere,
++           DOSBox-X and EMM386-free machines included.
++         - DPMI 0400h flags bit 1 ("host returns to real mode, not V86,
++           for reflected interrupts") is hardcoded by CWSDPMI (exphdlr.c,
++           case 0x0400: tss_ebx = dalloc_max_size() ? 5 : 1), so it says
++           "V86" whether or not a monitor is actually loaded.
++       The one real signal (VCPI present, INT 67h AX=DE00h) is deliberately
++       not consulted: the evidence above says this context is fine. Full
++       record: docs/timing.md in the sdl-dos-ports hub. */
++    const char *rdtsc_hint = SDL_GetHint("SDL_HINT_DOS_AUDIO_TIMER_RDTSC");
++    if (rdtsc_hint && SDL_strcmp(rdtsc_hint, "0") == 0) {
++        g_dos_audio_timer_mode = SDL_DOS_AUDIO_TIMER_PIT;
++        dos_port_dbg_log("audio IRQ timer: 8253 PIT counter 0 "
++                         "(RDTSC disabled via SDL_HINT_DOS_AUDIO_TIMER_RDTSC=0; "
++                         "~838 ns/tick)");
++        return;
++    }
++
+     if (detect_tsc_supported()) {
+         const uint32_t mhz = calibrate_tsc_cycles_per_us();
+         if (mhz > 0) {
+diff --git a/src/core/dos/SDL_dos_audio_synth.h b/src/core/dos/SDL_dos_audio_synth.h
+index 48a34aa3d..577a62fc6 100644
+--- a/src/core/dos/SDL_dos_audio_synth.h
++++ b/src/core/dos/SDL_dos_audio_synth.h
+@@ -295,6 +295,16 @@ extern volatile bool g_dos_audio_force_dsp_pause;
+  *
+  * Detection runs once at init; mode is then stable for the run. Engine
+  * has no role in timer selection.
++ *
++ * SDL/0138 killswitch: SDL_HINT_DOS_AUDIO_TIMER_RDTSC=0 (strict-"0") skips
++ * the RDTSC path entirely and selects the PIT unconditionally. It exists
++ * because RDTSC from a real-mode (V86) program hard-hangs the vcctrl rig's
++ * Pentium OverDrive 83 under EMM386 (2026-09-03, power cycle to recover);
++ * this DPMI-client context has been observed NOT to hang on that same rig
++ * (2026-08-13 QA logs), so the default stays auto. See
++ * SDL_DOSAudioInitTimer() for the evidence and for why no automatic
++ * V86-monitor guard is possible from a DJGPP program (SMSW/CR0.PE is
++ * always set in protected mode; CWSDPMI hardcodes the DPMI 0400h flag).
+  */
+ 
+ typedef enum {
+-- 
+2.47.3
+

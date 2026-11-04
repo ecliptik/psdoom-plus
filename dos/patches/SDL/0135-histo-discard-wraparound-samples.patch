@@ -1,0 +1,81 @@
+From 2a08a9e320446357a0f3f0421854214b8508b179 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <services.claude@accounts.ecliptik.com>
+Date: Thu, 27 Aug 2026 13:03:02 -0700
+Subject: [PATCH] dos: patch 0135 -- discard wraparound-corrupted samples in
+ SDL/0058 histo
+
+uclock() (what SDL_GetTicksNS is built on for this backend) is not
+monotonic on real DOS hardware -- a wraparound-order subtraction
+produces a duration near 2^32 in the underlying unit instead of the
+small positive value expected (docs/timing.md 'Your clock can lie').
+0058's Shape A scan-timing histo computed
+(SDL_GetTicksNS() - _p58_t0) / 1000ULL with no clamping and
+accumulated it unconditionally, so a single corrupted sample could
+silently inflate noisy_us_total/silent_us_total to an absurd value.
+
+Confirmed in the wild: a real 486DX2-50 capture (dossage/Passage,
+SDL_HINT_DOS_SILENCE_HISTO=1) showed noisy_us_total=1271313607
+(~21 minutes) over a 54-second run.
+
+Fix: discard a sample outside a generous 1,000,000us (1 second)
+sanity ceiling entirely -- neither counted nor accumulated -- rather
+than clamping it to that ceiling, per docs/timing.md's own guidance to
+treat a wildly-anomalous uclock()-derived duration as a suspect
+measurement to discard, not a finding to explain. Clamping instead of
+discarding would still corrupt the running average with a fabricated
+value. One scan of a caller-supplied audio buffer cannot plausibly
+take within three orders of magnitude of a second on any DOS-class
+CPU, so the threshold has no realistic false-positive risk against a
+genuine sample.
+
+Verified via isolated standalone compile (gcc -Wall -Wextra -Werror,
+zero warnings): a synthetic wraparound-underflow delta is discarded,
+a normal delta still accumulates correctly.
+---
+ src/audio/dos/SDL_dosaudio_sb.c | 30 ++++++++++++++++++++++++------
+ 1 file changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index 3383715dc..f66645b5f 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -3895,12 +3895,30 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+                    emit below still fires under both shapes). */
+                 const Uint64 _p58_us =
+                     (SDL_GetTicksNS() - _p58_t0) / 1000ULL;
+-                if (all_silence) {
+-                    g_p58_silent_count++;
+-                    g_p58_silent_us_total += _p58_us;
+-                } else {
+-                    g_p58_noisy_count++;
+-                    g_p58_noisy_us_total += _p58_us;
++                /* SDL/0135: uclock() (what SDL_GetTicksNS is built on
++                   here) is not monotonic on real DOS hardware -- a
++                   wraparound-order subtraction can produce a duration
++                   near 2^32 in the underlying unit instead of the small
++                   positive value expected (docs/timing.md "Your clock
++                   can lie" in the sdl-dos-ports hub). Confirmed in the
++                   wild: an unclamped _p58_us silently inflated
++                   noisy_us_total to an absurd multi-minute total on a
++                   real 486. Per that doc's own guidance, discard a
++                   wildly-anomalous single sample rather than accumulate
++                   or clamp it -- clamping to a ceiling would still
++                   corrupt the running average with a fabricated value.
++                   One scan of a caller-supplied audio buffer cannot
++                   plausibly take within three orders of magnitude of a
++                   second on any DOS-class CPU, so 1,000,000 us is a
++                   generous, still-conservative discard threshold. */
++                if (_p58_us < 1000000ULL) {
++                    if (all_silence) {
++                        g_p58_silent_count++;
++                        g_p58_silent_us_total += _p58_us;
++                    } else {
++                        g_p58_noisy_count++;
++                        g_p58_noisy_us_total += _p58_us;
++                    }
+                 }
+             }
+         }
+-- 
+2.47.3
+

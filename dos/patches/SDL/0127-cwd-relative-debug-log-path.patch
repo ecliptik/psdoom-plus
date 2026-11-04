@@ -1,0 +1,90 @@
+From 86c7358f0797a8771fd187deb9d82d18ea37050f Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 26 Aug 2026 18:55:10 -0700
+Subject: [PATCH] [SDL3-DOS] dos: patch 0127 -- CWD-relative debug log path,
+ not hardcoded per-port
+
+dos_port_dbg_resolve_path() hardcoded "/DOSKUTSU/LOGS/" (falling back to
+"/DOSKUTSU/") since patches 0024 and 0062 -- a real, silent bug for every
+port other than doskutsu: fopen() against a nonexistent absolute path
+fails quietly (dos_port_dbg_vlog() just returns early on a NULL FILE*,
+with no error surfaced anywhere), so any other port's SDL-backend debug
+log never gets written at all, and nothing about that failure looks
+different from "logging is simply off." Confirmed as the root cause of
+exactly this on dossage/Passage real hardware: SDLDBG.LOG was never found
+at any of the paths checked, because it was silently failing to open
+under a hardcoded /DOSKUTSU/ tree that doesn't exist on that install.
+
+Fix: resolve the log directory relative to CWD ("LOGS/<basename>",
+falling back to "<basename>" in CWD directly on a failed mkdir) instead
+of an absolute path rooted at one port's own install directory name. A
+port's own launcher already sets CWD to its install directory before
+running the exe -- the same assumption NXEngine's own DEBUG.LOG/
+getPrefPath makes -- so this lands in exactly the same place every port
+actually runs from, with zero per-port configuration and zero behavioral
+change for doskutsu itself (whose CWD is already C:\DOSKUTSU\ when it
+launches, so the relative path resolves to the identical location it
+already used).
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+---
+ src/video/dos/SDL_dosdbg.c | 31 ++++++++++++++++++-------------
+ 1 file changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/src/video/dos/SDL_dosdbg.c b/src/video/dos/SDL_dosdbg.c
+index 86160dd9f..8d9af0aa5 100644
+--- a/src/video/dos/SDL_dosdbg.c
++++ b/src/video/dos/SDL_dosdbg.c
+@@ -46,13 +46,18 @@
+ static FILE *g_dbg_log = NULL;
+ static char g_dbg_log_path[64];
+ 
+-// DOSKUTSU patch SDL/0062 (Phase 11 wave-53): the SDL backend log is
+-// relocated into a "LOGS" subdirectory of the game directory so the SDL
+-// trace co-locates with NXEngine's engine-side log, which the wave-53
+-// Logger change moves to "/DOSKUTSU/LOGS/" as well. The LOGS directory
+-// is created at runtime; if mkdir() fails for any reason other than
+-// "already exists" the path falls back to the un-prefixed "/DOSKUTSU/"
+-// location so logging never dies on an unwritable volume.
++// SDL/0127: the log path is CWD-relative, not rooted at a hardcoded game
++// directory -- shared/ is consumed by every port, and a path baked in for
++// one port's own install directory name silently breaks logging for every
++// other one (fopen() against a nonexistent absolute path fails silently;
++// dos_port_dbg_vlog() below has no way to surface that failure to anyone).
++// A port's own launcher already sets CWD to its install directory before
++// running the exe (same assumption NXEngine's own DEBUG.LOG/getPrefPath
++// makes), so a relative path lands in exactly the same place every port
++// actually runs from, with no per-port configuration needed. The log is
++// placed in a "LOGS" subdirectory of CWD, created at runtime; if mkdir()
++// fails for any reason other than "already exists" the path falls back to
++// CWD directly so logging never dies on an unwritable volume.
+ //
+ // The path is still overridable via the DOS_PORT_LOG_TAG env var so a
+ // multi-config bisect can write each run's SDL trace to a unique
+@@ -83,17 +88,17 @@ static const char *dos_port_dbg_resolve_path(void)
+         SDL_strlcpy(log_basename, "sdldbg.log", sizeof(log_basename));
+     }
+ 
+-    // Place the log in the "LOGS" subdir. mkdir() defensively; an EEXIST
+-    // failure is success for our purposes. Any other failure (read-only
+-    // volume, etc.) -> fall back to the un-prefixed dir so the trace is
+-    // never lost. DJGPP/DOS accept '/' as the path separator.
++    // Place the log in a "LOGS" subdir of CWD. mkdir() defensively; an
++    // EEXIST failure is success for our purposes. Any other failure
++    // (read-only volume, etc.) -> fall back to CWD directly so the trace
++    // is never lost. DJGPP/DOS accept '/' as the path separator.
+     int logs_dir_ok = 0;
+-    if (mkdir("/DOSKUTSU/LOGS", 0777) == 0 || errno == EEXIST) {
++    if (mkdir("LOGS", 0777) == 0 || errno == EEXIST) {
+         logs_dir_ok = 1;
+     }
+ 
+     SDL_snprintf(g_dbg_log_path, sizeof(g_dbg_log_path), "%s/%s",
+-                 logs_dir_ok ? "/DOSKUTSU/LOGS" : "/DOSKUTSU",
++                 logs_dir_ok ? "LOGS" : ".",
+                  log_basename);
+     return g_dbg_log_path;
+ }
+-- 
+2.47.3
+

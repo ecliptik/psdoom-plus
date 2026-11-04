@@ -1,0 +1,5 @@
+/build/
+/tools/djgpp
+/vendor/*/
+/dist/
+*.log
