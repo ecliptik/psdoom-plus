@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:07:07 -0800
-Subject: [PATCH 3/7] Platform layer: SDL3 audio, no busy wait, bigger zone
+Subject: [PATCH 3/8] Platform layer: SDL3 audio, no busy wait, bigger zone
 
 - i_sound.c: keep id's software mixer, but hand the 11025 Hz 16-bit
   stereo buffers to the platform layer (SDL3) instead of OSS /dev/dsp.

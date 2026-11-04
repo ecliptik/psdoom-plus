@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:49:28 -0800
-Subject: [PATCH] psDooM: processes as monsters, through libpsd
+Subject: [PATCH 1/2] psDooM: processes as monsters, through libpsd
 
 psDooM's hooks on Chocolate Doom, calling the shared glue in
 engines/common/psdoom (psdoom-plus tree) and libpsd. Generated with

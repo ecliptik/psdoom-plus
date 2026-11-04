@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Wed, 4 Nov 2026 08:21:09 -0800
-Subject: [PATCH 7/7] DOS: build with DJGPP (SDL3-DOS)
+Subject: [PATCH 7/8] DOS: build with DJGPP (SDL3-DOS)
 
 - i_net.c: DJGPP has no BSD sockets; single player only (-net errors)
 - i_system.c: I_GetTime from SDL_GetTicks (DJGPP's gettimeofday moves

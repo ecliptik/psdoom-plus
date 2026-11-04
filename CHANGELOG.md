@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 (2026-11-04)
+
+Fixes for Freedoom players, found while taking the README's screenshots.
+
+- **og, Chocolate Doom:** these engines no longer crash past MAP01 with Freedoom 2. psDooM's
+  `psdoom2.wad` adds one texture by shipping a whole Doom II texture list, and these vanilla-style
+  engines replaced the IWAD's list with it. Freedoom 2's later maps need textures Doom II lacks,
+  so MAP02 crashed (`LITE4`/`LITE96 not found`, or a segfault in og). Both engines now merge every
+  TEXTURE1/TEXTURE2 lump with its own WAD's PNAMES, as Crispy Doom does. The DOS build gets the
+  fix too.
+- **DSDA-Doom:** Freedoom 2 now counts as Doom II (DSDA-Doom calls its mission `tc_freedoom`), so
+  psDooM's MAP01 loads with it. Before, the level got no process monsters.
+- **`-pstest`:** on a level that gets no process monsters, it now fails at once with the reason,
+  instead of waiting forever.
+
 ## 0.1.0 (2026-11-04)
 
 The first release of psdoom-plus, a remake of psDooM (2000): every process is a Doom

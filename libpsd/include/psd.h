@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define PSD_VERSION       "0.1.0"
+#define PSD_VERSION       "0.1.1"
 #define PSD_API_VERSION   1
 
 #define PSD_USER_MAX      32

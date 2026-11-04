@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 15:08:23 -0800
-Subject: [PATCH 4/7] -iwad, Freedoom, XDG config and savegame directories
+Subject: [PATCH 4/8] -iwad, Freedoom, XDG config and savegame directories
 
 - -iwad <file>: the game mode comes from the WAD's own lump directory
   (MAP01 -> commercial, E4M1 -> retail, E2M1 -> registered).

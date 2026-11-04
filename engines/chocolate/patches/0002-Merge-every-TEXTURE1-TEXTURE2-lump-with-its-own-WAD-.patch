@@ -1,0 +1,226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Wed, 4 Nov 2026 12:37:37 -0800
+Subject: [PATCH 2/2] Merge every TEXTURE1/TEXTURE2 lump with its own WAD's
+ PNAMES
+
+After Crispy Doom: a PWAD that brings a texture list of its own (psDooM's
+levels do, for one texture) adds to the IWAD's instead of replacing it.
+With Freedoom 2, psdoom2.wad's Doom II-based list left the maps after
+MAP01 without textures they use (LITE4, LITE96): a crash on MAP02. The
+newest lumps come first, so PWAD definitions win name lookups and
+texture 0 stays the first of the newest TEXTURE1.
+---
+ src/doom/r_data.c | 143 ++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 100 insertions(+), 43 deletions(-)
+
+diff --git a/src/doom/r_data.c b/src/doom/r_data.c
+index 7f1bbbe0..6dd86ee7 100644
+--- a/src/doom/r_data.c
++++ b/src/doom/r_data.c
+@@ -445,6 +445,32 @@ static void GenerateTextureHashTable(void)
+ // Initializes the texture list
+ //  with the textures from the world map.
+ //
++//
++// psdoom-plus: every TEXTURE1/TEXTURE2 lump, each read with the PNAMES of its
++// own WAD (after Crispy Doom), so a PWAD that brings a texture list of its
++// own (psDooM's levels do, for one texture) adds to the IWAD's instead of
++// replacing it: with Freedoom, the maps after psDooM's MAP01 need textures
++// that Doom II's list lacks. The newest lumps come first, so their textures
++// win name lookups, and texture 0 is still the first of the newest TEXTURE1.
++//
++#define PS_MAXTEXLUMPS 64
++
++typedef struct
++{
++    lumpindex_t lump;
++    int *maptex;
++    int maxoff;
++    int numtextures;
++    int sumtextures;            // textures in this lump and the ones before
++    int pnamesbase;             // its WAD's PNAMES in patchlookup[]
++} ps_texlump_t;
++
++static boolean PS_IsTextureLump(lumpindex_t i)
++{
++    return !strncasecmp(lumpinfo[i]->name, DEH_String("TEXTURE1"), 8)
++        || !strncasecmp(lumpinfo[i]->name, DEH_String("TEXTURE2"), 8);
++}
++
+ void R_InitTextures (void)
+ {
+     maptexture_t*	mtexture;
+@@ -454,23 +480,17 @@ void R_InitTextures (void)
+ 
+     int			i;
+     int			j;
++    int			k;
+ 
+     int*		maptex;
+-    int*		maptex2;
+-    int*		maptex1;
+     
+     char		name[9];
+-    char*		names;
+-    char*		name_p;
+     
+     int*		patchlookup;
+     
+     int			nummappatches;
+     int			offset;
+     int			maxoff;
+-    int			maxoff2;
+-    int			numtextures1;
+-    int			numtextures2;
+ 
+     int*		directory;
+     
+@@ -478,42 +498,77 @@ void R_InitTextures (void)
+     int			temp2;
+     int			temp3;
+ 
+-    
+-    // Load the patch names from pnames.lmp.
++    lumpindex_t		pnames[PS_MAXTEXLUMPS];
++    int			pnamesbase[PS_MAXTEXLUMPS];
++    int			numpnames = 0;
++    ps_texlump_t	texlumps[PS_MAXTEXLUMPS];
++    int			numtexlumps = 0;
++    ps_texlump_t*	tl;
++
++    // Every PNAMES lump, newest first, as one patch lookup table.
++    nummappatches = 0;
++    for (i = numlumps - 1; i >= 0 && numpnames < PS_MAXTEXLUMPS; i--)
++    {
++        if (strncasecmp(lumpinfo[i]->name, DEH_String("PNAMES"), 8))
++            continue;
++        pnames[numpnames] = i;
++        pnamesbase[numpnames] = nummappatches;
++        nummappatches += LONG(*(int *) W_CacheLumpNum(i, PU_STATIC));
++        numpnames++;
++    }
++    if (numpnames == 0)
++        I_Error("R_InitTextures: no PNAMES lump");
+     name[8] = 0;
+-    names = W_CacheLumpName (DEH_String("PNAMES"), PU_STATIC);
+-    nummappatches = LONG ( *((int *)names) );
+-    name_p = names + 4;
+     patchlookup = Z_Malloc(nummappatches*sizeof(*patchlookup), PU_STATIC, NULL);
+-
+-    for (i = 0; i < nummappatches; i++)
++    for (i = 0, k = 0; i < numpnames; i++)
+     {
+-        M_StringCopy(name, name_p + i * 8, sizeof(name));
+-        patchlookup[i] = W_CheckNumForName(name);
++        int *names = W_CacheLumpNum(pnames[i], PU_STATIC);
++        char *name_p = (char *) names + 4;
++
++        for (j = 0; j < LONG(*names); j++)
++        {
++            M_StringCopy(name, name_p + j * 8, sizeof(name));
++            patchlookup[k++] = W_CheckNumForName(name);
++        }
++        W_ReleaseLumpNum(pnames[i]);
+     }
+-    W_ReleaseLumpName(DEH_String("PNAMES"));
+-
+-    // Load the map texture definitions from textures.lmp.
+-    // The data is contained in one or two lumps,
+-    //  TEXTURE1 for shareware, plus TEXTURE2 for commercial.
+-    maptex = maptex1 = W_CacheLumpName (DEH_String("TEXTURE1"), PU_STATIC);
+-    numtextures1 = LONG(*maptex);
+-    maxoff = W_LumpLength (W_GetNumForName (DEH_String("TEXTURE1")));
+-    directory = maptex+1;
+-	
+-    if (W_CheckNumForName (DEH_String("TEXTURE2")) != -1)
++
++    // The texture lumps: the newest TEXTURE1 (and TEXTURE2) first, as
++    // vanilla would use them, then every other one, newest first.
++    texlumps[numtexlumps++].lump = W_GetNumForName(DEH_String("TEXTURE1"));
++    if ((i = W_CheckNumForName(DEH_String("TEXTURE2"))) != -1)
++        texlumps[numtexlumps++].lump = i;
++    for (i = numlumps - 1; i >= 0 && numtexlumps < PS_MAXTEXLUMPS; i--)
+     {
+-	maptex2 = W_CacheLumpName (DEH_String("TEXTURE2"), PU_STATIC);
+-	numtextures2 = LONG(*maptex2);
+-	maxoff2 = W_LumpLength (W_GetNumForName (DEH_String("TEXTURE2")));
++        if (!PS_IsTextureLump(i))
++            continue;
++        for (j = 0; j < numtexlumps && texlumps[j].lump != i; j++)
++            ;
++        if (j == numtexlumps)
++            texlumps[numtexlumps++].lump = i;
+     }
+-    else
++    numtextures = 0;
++    for (i = 0; i < numtexlumps; i++)
+     {
+-	maptex2 = NULL;
+-	numtextures2 = 0;
+-	maxoff2 = 0;
++        tl = &texlumps[i];
++        tl->maptex = W_CacheLumpNum(tl->lump, PU_STATIC);
++        tl->maxoff = W_LumpLength(tl->lump);
++        tl->numtextures = LONG(*tl->maptex);
++        numtextures += tl->numtextures;
++        tl->sumtextures = numtextures;
++        // the PNAMES of the same WAD; without one, vanilla's (the newest)
++        tl->pnamesbase = 0;
++        for (j = 0; j < numpnames; j++)
++            if (lumpinfo[pnames[j]]->wad_file == lumpinfo[tl->lump]->wad_file)
++            {
++                tl->pnamesbase = pnamesbase[j];
++                break;
++            }
+     }
+-    numtextures = numtextures1 + numtextures2;
++    tl = texlumps;
++    maptex = tl->maptex;
++    maxoff = tl->maxoff;
++    directory = maptex+1;
+ 	
+     textures = Z_Malloc (numtextures * sizeof(*textures), PU_STATIC, 0);
+     texturecolumnlump = Z_Malloc (numtextures * sizeof(*texturecolumnlump), PU_STATIC, 0);
+@@ -547,11 +602,12 @@ void R_InitTextures (void)
+ 	if (!(i&63))
+ 	    printf (".");
+ 
+-	if (i == numtextures1)
++	while (i == tl->sumtextures)
+ 	{
+-	    // Start looking in second texture file.
+-	    maptex = maptex2;
+-	    maxoff = maxoff2;
++	    // Start looking in the next texture lump.
++	    tl++;
++	    maptex = tl->maptex;
++	    maxoff = tl->maxoff;
+ 	    directory = maptex+1;
+ 	}
+ 		
+@@ -577,9 +633,11 @@ void R_InitTextures (void)
+ 
+ 	for (j=0 ; j<texture->patchcount ; j++, mpatch++, patch++)
+ 	{
++	    int p = SHORT(mpatch->patch) + tl->pnamesbase;
++
+ 	    patch->originx = SHORT(mpatch->originx);
+ 	    patch->originy = SHORT(mpatch->originy);
+-	    patch->patch = patchlookup[SHORT(mpatch->patch)];
++	    patch->patch = p >= 0 && p < nummappatches ? patchlookup[p] : -1;
+ 	    if (patch->patch == -1)
+ 	    {
+ 		I_Error ("R_InitTextures: Missing patch in texture %s",
+@@ -599,9 +657,8 @@ void R_InitTextures (void)
+ 
+     Z_Free(patchlookup);
+ 
+-    W_ReleaseLumpName(DEH_String("TEXTURE1"));
+-    if (maptex2)
+-        W_ReleaseLumpName(DEH_String("TEXTURE2"));
++    for (i = 0; i < numtexlumps; i++)
++        W_ReleaseLumpNum(texlumps[i].lump);
+     
+     // Precalculate whatever possible.	
+ 
