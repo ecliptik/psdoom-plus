@@ -1,0 +1,8 @@
+url=https://github.com/kraflab/dsda-doom.git
+commit=8ed581ad5c868b4dba1c39eb21d29e4ddbed9fad
+tag=v0.30.1
+target=dsda-doom
+license=GPL-2.0 (prboom2/COPYING)
+project=dsda-doom
+cmake_include=dsda/psdoom.cmake
+cmake_dir=prboom2

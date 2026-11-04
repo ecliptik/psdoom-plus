@@ -10,6 +10,11 @@
 
 #include "doomtype.h"
 
+#if defined(PSE_DBOOLEAN) && !defined(PS_BOOLEAN_DEFINED)
+#define PS_BOOLEAN_DEFINED
+typedef dboolean boolean;
+#endif
+
 boolean	PSE_IsDoom1 (void);		// registered/retail: psdoom1.wad replaces E1M1
 boolean	PSE_IsDoom2 (void);		// Doom II proper (not TNT/Plutonia): psdoom2.wad
 void	PSE_AddWad (const char* path);	// add a PWAD before the WADs are merged

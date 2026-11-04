@@ -134,7 +134,8 @@ configure_args() {  # engine rootdir
 	e=$1 r=$2
 	inc=$(upstream "$e" cmake_include)
 	if [ -n "$inc" ]; then
-		echo "-S $r/engines/$e/src -B $r/build/$e -DCMAKE_BUILD_TYPE=Release" \
+		sub=$(upstream "$e" cmake_dir)
+		echo "-S $r/engines/$e/src${sub:+/$sub} -B $r/build/$e -DCMAKE_BUILD_TYPE=Release" \
 		     "-DPSDOOM_ENGINE=$e -DCMAKE_PROJECT_$(upstream "$e" project)_INCLUDE=$r/engines/$inc"
 	else
 		echo "-S $r/engines/$e -B $r/build/$e"

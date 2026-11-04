@@ -20,7 +20,9 @@
 #include "i_system.h"
 #include "m_argv.h"
 #include "m_random.h"
+#ifndef PSE_DEFS
 #include "p_local.h"
+#endif
 #include "p_mobj.h"
 #include "r_main.h"
 #include "info.h"
@@ -29,7 +31,31 @@
 #include "ps_engine.h"
 #include "psd.h"
 
+// An engine whose API differs (Boom/MBF descendants) names a header of
+// overrides with -DPSE_DEFS="ps_defs.h"; the defaults fit linuxdoom,
+// Chocolate and Crispy
+#ifdef PSE_DEFS
+#include PSE_DEFS
+#endif
+#ifndef PSE_KillMobj
 void	P_KillMobj (mobj_t* source, mobj_t* target);	// p_inter.c
+#define PSE_KillMobj(source, target)	P_KillMobj (source, target)
+#endif
+#ifndef PSE_TeleportMove
+#define PSE_TeleportMove(mo, x, y)	P_TeleportMove (mo, x, y)
+#endif
+#ifndef PSE_Random
+#define PSE_Random()			P_Random ()
+#endif
+#ifndef PSE_MapEnd			// after map checks outside the ticker
+#define PSE_MapEnd()
+#endif
+#ifndef PSE_Say
+#define PSE_Say(text)			(players[consoleplayer].message = (text))
+#endif
+#ifndef PSE_GameOK			// e.g. not Heretic/Hexen
+#define PSE_GameOK()			1
+#endif
 
 boolean	ps_level_loaded;
 boolean	respawnitems;
@@ -44,7 +70,7 @@ static int	poll_interval;		// tics
 static boolean	active;			// this level manages processes
 
 // pid -> monster, for the current level only
-typedef struct { long pid; mobj_t* mo; } psmon_t;
+typedef struct { long pid; mobj_t* mo; boolean seen; } psmon_t;
 static psmon_t*	mons;
 static int	nmons, capmons;
 
@@ -92,6 +118,7 @@ static void add_mon (long pid, mobj_t* mo)
     }
     mons[nmons].pid = pid;
     mons[nmons].mo = mo;
+    mons[nmons].seen = true;
     nmons++;
 }
 
@@ -103,13 +130,13 @@ static void drop_mon (psmon_t* m)
 static void say (const char* text)
 {
     snprintf (msgbuf, sizeof msgbuf, "%s", text);
-    players[consoleplayer].message = msgbuf;
+    PSE_Say (msgbuf);
 }
 
 static boolean level_qualifies (void)
 {
     // psDooM: only the first map, never in demos (or netgames: they'd desync)
-    if (ctx == NULL || demoplayback || demorecording || netgame)
+    if (ctx == NULL || demoplayback || demorecording || netgame || !PSE_GameOK ())
 	return false;
     if (gamemap != 1)
 	return false;
@@ -149,7 +176,7 @@ static mobj_t* spawn_process (const psd_proc* p)
 	    continue;
 	}
 	if (mo->tics > 0)
-	    mo->tics = 1 + (P_Random () % mo->tics);
+	    mo->tics = 1 + (PSE_Random () % mo->tics);
 	mo->angle = ANG45 * (angle / 45);
 	mo->flags &= ~MF_COUNTKILL;	// not part of the level's kill count
 	mo->ps_pid = p->pid;
@@ -184,11 +211,15 @@ static void vanish (mobj_t* mo)
     if (mo->health > 0)
     {
 	mo->ps_removing = true;
-	P_KillMobj (NULL, mo);
+	PSE_KillMobj (NULL, mo);
     }
     mo->ps_removing = true;		// P_RemoveMobj: don't psd_forget
     P_RemoveMobj (mo);
 }
+
+#ifdef PSE_ForEachMobj
+static boolean	resyncing;		// PS_Resync's poll: adopt, don't spawn
+#endif
 
 static void test_note_removed (long pid)
 {
@@ -211,6 +242,16 @@ static int on_event (void* user, psd_event ev, const psd_proc* p)
     switch (ev)
     {
       case PSD_EV_SPAWN:
+#ifdef PSE_ForEachMobj
+	if (m && resyncing && m->mo->health > 0)
+	{				// a loaded monster: still running
+	    m->seen = true;
+	    set_label (m->mo, p);
+	    m->mo->ps_protected = p->is_protected;
+	    m->mo->ps_draw = true;
+	    return 1;
+	}
+#endif
 	if (m)				// stale entry from an earlier life
 	    drop_mon (m);
 	mo = spawn_process (p);
@@ -289,6 +330,13 @@ static const char* find_data (const char* name)
 	}
     }
     return NULL;
+}
+
+// for engines that reject command-line options they don't know
+boolean PS_IsOption (const char* arg)
+{
+    return !strncmp (arg, "-ps", 3) || !strncmp (arg, "-nops", 5)
+	|| !strcmp (arg, "-nomonsters.") || !strcmp (arg, "-respawnitems");
 }
 
 void PS_AddCustomLevel (void)
@@ -378,6 +426,7 @@ void PS_LevelStart (void)
     if (active)
     {
 	psd_poll (ctx, on_event, NULL);
+	PSE_MapEnd ();
 	if (test_state)
 	    test_deadline = leveltime + 35 * 30;
     }
@@ -388,6 +437,50 @@ void PS_SaveLoaded (void)
     PS_LevelEnd ();
     PS_LevelStart ();
 }
+
+#ifdef PSE_ForEachMobj
+// Engines whose saves and rewind keep pid monsters (with their ps_pid) call
+// PS_Resync() after restoring the thing list: living pid monsters are
+// adopted again, and those whose process has gone meanwhile vanish
+static void adopt (mobj_t* mo)
+{
+    if (!mo->ps_pid)
+	return;
+    mo->ps_removing = false;
+    if (!active || mo->health <= 0 || find_mon (mo->ps_pid))
+    {
+	mo->ps_pid = 0;			// a corpse stays, as in psDooM
+	mo->ps_draw = false;
+	return;
+    }
+    add_mon (mo->ps_pid, mo);
+    mons[nmons - 1].seen = false;
+}
+
+void PS_Resync (void)
+{
+    int i;
+
+    nmons = 0;				// the old pointers may be gone
+    if (ctx)
+	psd_reset (ctx);
+    active = level_qualifies ();
+    PSE_ForEachMobj (adopt);
+    if (!active)
+	return;
+    resyncing = true;
+    psd_poll (ctx, on_event, NULL);
+    resyncing = false;
+    for (i = nmons - 1; i >= 0; i--)
+	if (!mons[i].seen)
+	{
+	    mobj_t* mo = mons[i].mo;
+	    drop_mon (&mons[i]);
+	    vanish (mo);
+	}
+    PSE_MapEnd ();
+}
+#endif
 
 // ------------------------------------------------------------------
 // -pstest
@@ -456,7 +549,7 @@ static void test_ticker (void)
 			mobj_t* mo = mons[i].mo;
 			fixed_t x = mo->x - 160 * finecosine[mo->angle >> ANGLETOFINESHIFT];
 			fixed_t y = mo->y - 160 * finesine[mo->angle >> ANGLETOFINESHIFT];
-			P_TeleportMove (shooter, x, y);
+			PSE_TeleportMove (shooter, x, y);
 			shooter->angle = R_PointToAngle2 (x, y, mo->x, mo->y);
 			mo->tics = -1;		// hold still for the picture
 			test_finish_at = leveltime + 4;
@@ -527,6 +620,7 @@ static void confirm_kill (int key)
 	P_RemoveMobj (mo);
 	psd_forget (ctx, confirm_pid);
     }
+    PSE_MapEnd ();
     confirm_pid = 0;
 }
 

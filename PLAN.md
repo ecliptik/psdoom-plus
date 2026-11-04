@@ -316,7 +316,18 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 7. **DOS (og)**: the SDL3 backend under DJGPP via the hub's `shared/` layer, the `mcb` backend, then
    `psdoomd` + the `net` backend. *Exit:* in DOSBox-X, shooting a TSR frees it and shooting a remote
    monster kills a `sleep` in a tv-\* guest; then the same on a real-hardware rig.
-8. **Tier 2 engines**: DSDA-Doom, Woof!.
+8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
+   per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random
+   signatures, DSDA's `dboolean` and argv, its messenger) and hook scripts
+   (`tools/apply-woof-hooks.py`, `tools/apply-dsda-hooks.py`); psDooM's options are registered with
+   both engines' command-line checks. Both save and rewind the whole thing list (Woof! keyframes,
+   DSDA saves/key frames), so pid monsters stay in saves with their pid and `PS_Resync()` re-adopts
+   them after a restore instead of being left out. Woof! 16 needs SDL3 3.4: when the system's is
+   older (Debian 13) a static SDL3 3.4.20 is built at configure time. Labels: Woof! at any
+   resolution, DSDA-Doom in its software renderer (not the OpenGL one yet). *Exit met:* 8/8 (real
+   signals) for both on Debian, FreeBSD and Haiku. Not yet covered by `-pstest`: save/rewind
+   re-adoption (works by construction; with the asynchronous `cmd` backend the first poll after a
+   restore may come back empty, so restored monsters vanish and respawn on the next poll).
 9. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
    builtins, plus a QuakeC mod (`psquake`) that spawns grunts/enforcers for processes and shamblers
    for daemons. Test assets: the shareware pak0 or LibreQuake.

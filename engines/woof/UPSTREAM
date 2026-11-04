@@ -1,0 +1,7 @@
+url=https://github.com/fabiangreffrath/woof.git
+commit=4553f9a739d8979a69907c9dab384678902522fa
+tag=woof_16.0.0
+target=woof
+license=GPL-2.0 (COPYING)
+project=Woof
+cmake_include=woof/psdoom.cmake
