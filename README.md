@@ -9,7 +9,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | Engine | Status |
 |---|---|
 | og (id's linuxdoom-1.10 + SDL3) | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
-| Chocolate Doom, Crispy Doom | planned |
+| Chocolate Doom 3.1.1, Crispy Doom 7.2 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | GZDoom, UZDoom | planned |
 | DSDA-Doom, Woof! | planned |
 | Quake, Quake 3 (stretch) | planned |
@@ -24,13 +24,14 @@ work unchanged.
 > throwaway VM first.
 
 The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux, FreeBSD, OpenBSD, NetBSD and
-Haiku today; the other engines follow. See [PLAN.md](PLAN.md) for the design and the phases.
+Haiku today, and so do Chocolate Doom and Crispy Doom; the other engines follow. See [PLAN.md](PLAN.md) for the design and the phases.
 
 ```sh
 tools/psdev build og                       # fetch id's source, apply engines/og/patches, build
 build/og/psdoom-og -nopsact                # dry run first: shows processes, signals nothing
 build/og/psdoom-og -iwad freedoom1.wad     # modern mode (protected session, TERM then KILL)
 build/og/psdoom-og -psclassic              # psDooM 2000: renice +5, kill -9, nothing protected
+tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-crispy
 ```
 
 ## Layout
