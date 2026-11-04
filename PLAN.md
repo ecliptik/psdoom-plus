@@ -358,8 +358,14 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
      header), transitively, cached per arena+IVT; CHAINTSR.COM reproduces it in DOSBox-X
      (`check-mcb.sh` 12/12). Only one CONFIG.SYS driver (VIDECDD, in a UMB "SD" block) was found;
      HIMEM/EMM386 did not appear, so the conventional SD walk needs `PSDPS -v` from the rig.
-   - Remaining: `CHAINCHK.BAT` on the Gateway (PSDPS only: the chain fix against UNIVBE/DOSKEY/
-     MSCDEX, and the raw MCB/SD dump for the driver walk); the optional NET leg.
+   - ✅ **Gateway follow-up** (2026-11-04, `CHAINCHK.BAT`, read-only, PGSB and NET boots;
+     `tests/out/g2k/20261104/chainchk/`): with the chain scan, UNIVBE, MSCDEX and DOSKEY are now
+     protected in modern mode (links found from COMMAND.COM's and CTMOUSE's blocks), and in NET
+     the ODI stack (LSL, E100BODI, ODIPKT) is too. The raw dump showed HIMEM and EMM386 as 'D'
+     sub-blocks of the first system-data block, whose name MS-DOS 6.22 leaves as "SD" plus junk
+     (`SD??R???`): the backend matched the whole name and skipped it. Now it matches the first
+     two bytes (fix confirmed against the dump by reading; next rig session confirms it live).
+   - Remaining: the optional NET leg (PSDOOM -psnet against a disposable host on the rig's LAN).
 
 8. ✅ **Tier 2 engines** (2026-11-03): Woof! 16.0.0 and DSDA-Doom 0.30.1 on the shared glue, with
    per-engine API shims (`engines/<e>/psdoom/ps_defs.h`: P_KillMobj/P_TeleportMove/P_Random

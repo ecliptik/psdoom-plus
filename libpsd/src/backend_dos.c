@@ -49,6 +49,7 @@ typedef struct {
 	unsigned size;                /* paragraphs */
 	char type;
 	char name[9];
+	int sd;                       /* DOS 4+ system data ("SD..."): holds drivers */
 } mcb;
 
 typedef struct {
@@ -158,6 +159,9 @@ static int read_mcb(unsigned seg, mcb *m)
 	m->owner = raw[1] | (raw[2] << 8);
 	m->size = raw[3] | (raw[4] << 8);
 	mcb_name(raw + 8, m->name);
+	/* MS-DOS 6.22 leaves junk after "SD" in the first one (the Gateway
+	 * 2000 showed "SD??R???"), so match the two bytes, not the name */
+	m->sd = raw[8] == 'S' && raw[9] == 'D';
 	return m->type == 'M' || m->type == 'Z';
 }
 
@@ -464,7 +468,7 @@ static int dos_snapshot(psd_backend *b, psd_proc **out, size_t *n)
 		const mcb *m = &s->blocks[i];
 		psd_proc *p;
 
-		if (m->owner == 8 && strcmp(m->name, "SD") == 0) {
+		if (m->owner == 8 && m->sd) {
 			add_drivers(s, m);
 			continue;
 		}
