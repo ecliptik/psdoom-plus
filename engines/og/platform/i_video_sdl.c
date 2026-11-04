@@ -41,14 +41,19 @@ static void InitSurfaceVideo(void)
 {
 	SDL_DisplayMode **modes;
 	int i, n = 0;
+	// -640: 640x480 8-bit (VESA, 60 Hz) instead of mode 13h's 320x200 at
+	// 70 Hz, which some capture devices cannot lock to; the frame is
+	// scaled 2x2.4 (Doom's pixels were never square anyway)
+	int w = M_CheckParm("-640") ? 640 : SCREENWIDTH;
+	int h = M_CheckParm("-640") ? 480 : SCREENHEIGHT;
 
-	window = SDL_CreateWindow("psdoom-plus", SCREENWIDTH, SCREENHEIGHT,
+	window = SDL_CreateWindow("psdoom-plus", w, h,
 	                          M_CheckParm("-window") ? 0 : SDL_WINDOW_FULLSCREEN);
 	if (window == NULL)
 		I_Error("I_InitGraphics: %s", SDL_GetError());
 	modes = SDL_GetFullscreenDisplayModes(SDL_GetPrimaryDisplay(), &n);
 	for (i = 0; modes && i < n; i++)
-		if (modes[i]->w == SCREENWIDTH && modes[i]->h == SCREENHEIGHT &&
+		if (modes[i]->w == w && modes[i]->h == h &&
 		    modes[i]->format == SDL_PIXELFORMAT_INDEX8) {
 			SDL_SetWindowFullscreenMode(window, modes[i]);
 			break;

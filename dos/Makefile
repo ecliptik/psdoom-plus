@@ -100,3 +100,4 @@ bundle: game tests $(CWSDPMI) $(NE2000)
 	cp $(NE2000) $(BUNDLE)/NE2000.COM
 	cp $(TOP)/data/psdoom1.wad $(BUNDLE)/PSDOOM1.WAD
 	cp $(TOP)/data/psdoom2.wad $(BUNDLE)/PSDOOM2.WAD
+	cp tests/MCBTEST.BAT tests/SMOKE.BAT tests/NETTEST.BAT $(BUNDLE)/
