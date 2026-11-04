@@ -385,7 +385,10 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 10. **Stretch: Quake 3**: no engine patch. A native `qagame` mod for ioquake3/Quake3e (`vm_game 0`)
    links libpsd, and processes become bots named `pid:comm` (Q3 has no monsters). First hit renices,
    a frag kills. Test assets: OpenArena (free), on a custom arena with AAS.
-11. **Release**: tagged source releases; optionally a kubedoom-compatible image built on
+11. **Release**: ✅ **0.1.0** (2026-11-04): tag `v0.1.0` at `a188c21`, GitHub release with
+    `CHANGELOG.md`'s notes and `psdoom-plus-0.1.0-dos.zip` (`make -C dos dist`; sha256
+    `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,
+    Woof! 8/8, DOS via psdoomd 6/6. Still to come: tagged source releases; optionally a kubedoom-compatible image built on
     psdoom-plus (offered upstream to kubedoom rather than as a rival); packaging (AUR, FreeBSD port, HaikuPorts recipe) as
     follow-up.
 
