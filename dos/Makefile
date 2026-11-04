@@ -118,7 +118,7 @@ dist: game $(CWSDPMI)
 	cp $(VENDOR_DIR)/cwsdpmi/cwsdpmi.doc $(DISTDIR)/CWSDPMI.DOC
 	cp $(TOP)/data/psdoom1.wad $(DISTDIR)/PSDOOM1.WAD
 	cp $(TOP)/data/psdoom2.wad $(DISTDIR)/PSDOOM2.WAD
-	sed 's/@VERSION@/$(VERSION)/g' dist/README.TXT | sed 's/$$/\r/' > $(DISTDIR)/README.TXT
+	sed 's/@VERSION@/$(VERSION)/g' release/README.TXT | sed 's/$$/\r/' > $(DISTDIR)/README.TXT
 	sed 's/$$/\r/' $(TOP)/LICENSE > $(DISTDIR)/COPYING.TXT
 	sed 's/$$/\r/' $(VENDOR_DIR)/SDL/LICENSE.txt > $(DISTDIR)/SDL.TXT
 	cd $(BUILD_DIR) && TZ=UTC zip -q -X -r $(DISTNAME).zip $(DISTNAME)
