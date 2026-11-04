@@ -39,8 +39,20 @@ if(PSDOOM_ENGINE STREQUAL "gzdoom" AND NOT ZMUSIC_LIBRARIES)
                                 -DCMAKE_INSTALL_LIBDIR=lib
                         RESULT_VARIABLE rc OUTPUT_QUIET)
         if(NOT rc)
-            execute_process(COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/zmusic-build
-                                    --target install --parallel
+            # a bare --parallel lets make run unlimited jobs, which runs a 4 GB
+        # guest out of memory: one job per CPU, and no more than one per 1.5 GB
+        include(ProcessorCount)
+        ProcessorCount(zm_jobs)
+        cmake_host_system_information(RESULT zm_mem QUERY TOTAL_PHYSICAL_MEMORY)
+        math(EXPR zm_cap "${zm_mem} / 1536")
+        if(zm_jobs EQUAL 0 OR zm_jobs GREATER zm_cap)
+            set(zm_jobs ${zm_cap})
+        endif()
+        if(zm_jobs LESS 1)
+            set(zm_jobs 1)
+        endif()
+        execute_process(COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}/zmusic-build
+                                    --target install --parallel ${zm_jobs}
                             RESULT_VARIABLE rc OUTPUT_QUIET)
         endif()
         if(rc)
@@ -57,6 +69,19 @@ if(PSDOOM_ENGINE STREQUAL "gzdoom" AND EXISTS ${CMAKE_BINARY_DIR}/zmusic/lib)
          FILES_MATCHING PATTERN "libzmusic*")
 endif()
 
+# ZVulkan includes <X11/Xlib.h> without asking for X11's include path, which
+# is only on the default path on Linux (BSDs keep it under /usr/local or /usr/X11R6)
+find_package(X11 QUIET)
+if(X11_FOUND)
+    include_directories(SYSTEM ${X11_INCLUDE_DIR})
+else()
+    set(VULKAN_USE_XLIB OFF CACHE BOOL "" FORCE)
+endif()
+# Haiku has no Vulkan surface support in SDL: build the OpenGL renderer only
+if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
+    set(HAVE_VULKAN OFF CACHE BOOL "" FORCE)
+endif()
+
 set(ZDOOM_EXE_NAME psdoom-${PSDOOM_ENGINE} CACHE FILEPATH "Name of the executable to create" FORCE)
 
 function(psdoom_add_natives)
@@ -65,5 +90,12 @@ function(psdoom_add_natives)
         PSDOOM_DATADIR="${PSD_ROOT}/data"
         PSDOOM_SHAREDIR="${CMAKE_INSTALL_PREFIX}/share/psdoom")
     target_link_libraries(zdoom psd)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Haiku")
+        # sockets live in libnetwork; zipdir's fts(3) in libbsd
+        target_link_libraries(zdoom network)
+        if(TARGET zipdir)
+            target_link_libraries(zipdir bsd)
+        endif()
+    endif()
 endfunction()
 cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR} CALL psdoom_add_natives)

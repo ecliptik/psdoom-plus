@@ -21,8 +21,10 @@ have_all() {
 	need pkg-config || need pkgconf || return 1
 	pkg-config --exists sdl3 sdl2 2>/dev/null || return 1
 	[ $want_zdoom -eq 0 ] && return 0
-	[ "$(uname -s)" = Haiku ] || need Xvfb || return 1
-	need git && need c++
+	need git && need c++ || return 1
+	pkg-config --exists vpx glib-2.0 openal 2>/dev/null || return 1
+	[ "$(uname -s)" = Haiku ] && return 0
+	need Xvfb && pkg-config --exists x11 2>/dev/null
 }
 
 if have_all; then
@@ -42,7 +44,7 @@ Linux)
 FreeBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf sdl3 sdl2"
-	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx openal-soft xorg-vfbserver mesa-dri"
+	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git glib libX11 libvpx openal-soft xorg-vfbserver mesa-dri"
 	# shellcheck disable=SC2086
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
@@ -73,9 +75,21 @@ NetBSD)
 Haiku)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs libsdl3_devel libsdl2_devel"
-	[ $want_zdoom -eq 1 ] && pkgs="$pkgs libvpx_devel openal_devel"
+	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx_devel openal_devel mesa_devel glib2_devel"
+	# The tv-haiku image carries an inactive zlib_devel .hpkg in
+	# /boot/system/packages, which makes any transaction that pulls it in
+	# fail ("... already exists"): move such a stale file aside, retry once
 	# shellcheck disable=SC2086
-	pkgman install -y $pkgs ;;
+	pkgman install -y $pkgs 2>&1 | tee /tmp/bootstrap-pkgman.log
+	stale=$(sed -n 's|.*Failed to move file "[^"]*/\([^/"]*\.hpkg\)" to "/boot/system/packages".*|\1|p' /tmp/bootstrap-pkgman.log | head -1)
+	if [ -n "$stale" ] && [ -f "/boot/system/packages/$stale" ]; then
+		echo "bootstrap: moving stale /boot/system/packages/$stale aside"
+		mkdir -p "$HOME/stale-hpkg"
+		mv "/boot/system/packages/$stale" "$HOME/stale-hpkg/"
+		rm -rf /boot/system/packages/administrative/transaction-*
+		# shellcheck disable=SC2086
+		pkgman install -y $pkgs
+	fi ;;
 *)
 	echo "bootstrap: don't know how to install on $os" >&2
 	exit 1 ;;

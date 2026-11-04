@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 18:57:59 -0800
+Subject: [PATCH 3/4] versioninfo.h: undefine BSD's major/minor macros
+
+---
+ src/versioninfo.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/versioninfo.h b/src/versioninfo.h
+index 6a2edb5..e623224 100644
+--- a/src/versioninfo.h
++++ b/src/versioninfo.h
+@@ -19,6 +19,11 @@
+ 
+ #include <string>
+ 
++// FreeBSD's <sys/types.h> defines major() and minor() as function-like
++// macros, which would expand in the member initializers below
++#undef major
++#undef minor
++
+ class FString;
+ 
+ struct VersionInfo

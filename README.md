@@ -10,7 +10,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 |---|---|
 | og (id's linuxdoom-1.10 + SDL3) | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | Chocolate Doom 3.1.1, Crispy Doom 7.2 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
-| GZDoom, UZDoom | planned |
+| GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | DSDA-Doom, Woof! | planned |
 | Quake, Quake 3 (stretch) | planned |
 
@@ -24,7 +24,8 @@ work unchanged.
 > throwaway VM first.
 
 The **og** engine (id's own linuxdoom-1.10 on SDL3) plays on Linux, FreeBSD, OpenBSD, NetBSD and
-Haiku today, and so do Chocolate Doom and Crispy Doom; the other engines follow. See [PLAN.md](PLAN.md) for the design and the phases.
+Haiku today, and so do Chocolate Doom and Crispy Doom; GZDoom and UZDoom play on Linux, FreeBSD
+and Haiku; the other engines follow. See [PLAN.md](PLAN.md) for the design and the phases.
 
 ```sh
 tools/psdev build og                       # fetch id's source, apply engines/og/patches, build
@@ -32,6 +33,7 @@ build/og/psdoom-og -nopsact                # dry run first: shows processes, sig
 build/og/psdoom-og -iwad freedoom1.wad     # modern mode (protected session, TERM then KILL)
 build/og/psdoom-og -psclassic              # psDooM 2000: renice +5, kill -9, nothing protected
 tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-crispy
+tools/psdev build uzdoom                   # or gzdoom: build/uzdoom/psdoom-uzdoom (needs GL)
 ```
 
 ## Layout
@@ -44,6 +46,8 @@ tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-c
 | `tools/psdev` | developer CLI: test VMs, `test unit [--vm <os>]` |
 | `contrib/helpers/` | example psdoom-ng hook helpers: Docker containers, Kubernetes pods |
 | `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
+| `engines/<engine>/` | other engines: `UPSTREAM` pin and `patches/`; the source is fetched into `src/` |
+| `engines/common/` | glue shared by the Doom-family engines (`psdoom/`) and by GZDoom/UZDoom (`zdoom/`, ZScript) |
 | `tests/vm/` | guest bootstrap and end-to-end tests (`tools/psdev test og --vm debian`) |
 | `orig/` | the original psDooM 2000.05.03.b sources and downloads, kept for reference |
 

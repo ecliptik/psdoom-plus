@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Micheal Waltz <micheal@ecliptik.com>
 Date: Tue, 3 Nov 2026 16:34:46 -0800
-Subject: [PATCH] psDooM: processes as monsters, through libpsd
+Subject: [PATCH 1/2] psDooM: processes as monsters, through libpsd
 
 Hooks for the psdoom-plus ZScript and natives (engines/common/zdoom in
 the psdoom-plus tree; psdoom.zs is copied into wadsrc at configure time,

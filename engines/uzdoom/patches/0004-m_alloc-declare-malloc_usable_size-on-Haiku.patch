@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 19:04:59 -0800
+Subject: [PATCH 4/4] m_alloc: declare malloc_usable_size on Haiku
+
+---
+ src/common/utility/m_alloc.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/common/utility/m_alloc.cpp b/src/common/utility/m_alloc.cpp
+index 238ef5c..6eeffa2 100644
+--- a/src/common/utility/m_alloc.cpp
++++ b/src/common/utility/m_alloc.cpp
+@@ -32,6 +32,11 @@
+ #else
+ #include <malloc.h>
+ #endif
++#ifdef __HAIKU__
++// in libroot, but <malloc.h> declares it only under _DEFAULT_SOURCE, and
++// it may already have been included without it
++extern "C" size_t malloc_usable_size(void *ptr);
++#endif
+ #if defined(__sun__) || defined(__sun)
+ size_t _msize(void* block)
+ {

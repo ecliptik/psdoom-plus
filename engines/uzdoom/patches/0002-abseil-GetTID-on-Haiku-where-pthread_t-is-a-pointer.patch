@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Micheal Waltz <micheal@ecliptik.com>
+Date: Tue, 3 Nov 2026 18:50:29 -0800
+Subject: [PATCH 2/4] abseil: GetTID on Haiku, where pthread_t is a pointer
+
+---
+ libraries/abseil/absl/base/internal/sysinfo.cc | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/libraries/abseil/absl/base/internal/sysinfo.cc b/libraries/abseil/absl/base/internal/sysinfo.cc
+index a62dd31..d31b74f 100644
+--- a/libraries/abseil/absl/base/internal/sysinfo.cc
++++ b/libraries/abseil/absl/base/internal/sysinfo.cc
+@@ -466,6 +466,13 @@ pid_t GetTID() {
+   return static_cast<pid_t>(zx_thread_self());
+ }
+ 
++#elif defined(__HAIKU__)
++
++// pthread_t is a pointer on Haiku; its value is unique within the process
++pid_t GetTID() {
++  return static_cast<pid_t>(reinterpret_cast<intptr_t>(pthread_self()));
++}
++
+ #else
+ 
+ // Fallback implementation of `GetTID` using `pthread_self`.

@@ -30,6 +30,8 @@ else
 fi
 export HOME="$work/home" XDG_STATE_HOME="$work/state"
 mkdir -p "$HOME"
+# Haiku apps expect ~/config/settings; UZDoom hangs at startup without it
+[ "$(uname -s)" = Haiku ] && mkdir -p "$HOME/config/settings" "$HOME/config/cache"
 # the game shows only our processes (non-root default); make it explicit
 PSDOOMUSER=$(id -un)
 export PSDOOMUSER
