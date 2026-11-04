@@ -88,13 +88,13 @@ pstest C1 | grep -q "targeted=2 removed=2 result=ok" && ok "classic -pstest TSR:
 [ "$(count PS1 HOOKTSR)" = 1 ] && ok "classic leaves the untargeted HOOKTSR" || bad "HOOKTSR gone too early (PS1)"
 echo "== classic: shoot the hooking TSR (nothing is protected)"
 pstest C2
-[ "$(count PS2 HOOKTSR)" = 0 ] && ok "classic frees HOOKTSR although INT 60h points into it" || bad "HOOKTSR still resident (PS2)"
+[ "$(count PS2 HOOKTSR)" = 0 ] && ok "classic frees HOOKTSR although INT F1h points into it" || bad "HOOKTSR still resident (PS2)"
 echo "== modern: hooked blocks and our own chain are protected"
 pstest M1
 [ "$(count PS3 TSR)" = 2 ] && [ "$(count PS3 HOOKTSR)" = 1 ] && ok "TSRs reloaded" || bad "TSRs not reloaded (PS3)"
 [ "$(count PS4 TSR)" = 0 ] && ok "modern frees the plain TSRs" || bad "modern left TSRs (PS4)"
 pstest M2
-[ "$(count PS5 HOOKTSR)" = 1 ] && ok "modern does not free HOOKTSR (INT 60h points into it)" || bad "modern freed HOOKTSR (PS5)"
+[ "$(count PS5 HOOKTSR)" = 1 ] && ok "modern does not free HOOKTSR (INT F1h points into it)" || bad "modern freed HOOKTSR (PS5)"
 pstest M3
 [ "$(count PS6 COMMAND)" -ge 1 ] && ok "modern does not free COMMAND.COM (our parent)" || bad "COMMAND gone (PS6)"
 echo "== audit log"

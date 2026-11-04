@@ -98,7 +98,7 @@ There is no Doom network play (`-net`): only psdoomd uses the network.
 ## Testing
 
 `make check` runs `tests/dosbox-pstest.sh`. It loads two plain TSRs and one
-that hooks INT 60h, lets `PSDOOM -pstest` shoot them in classic and then
+that hooks INT F1h, lets `PSDOOM -pstest` shoot them in classic and then
 modern mode, and checks the memory chain after each run with `PSDPS`. It
 also checks that the audit log records the kills.
 

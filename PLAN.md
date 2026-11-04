@@ -325,7 +325,7 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
      `backend_dos.c` walks the MCB chain (UMBs linked) and the SD sub-blocks; kill frees the
      owner's blocks or unlinks a driver from the device chain; modern protects our PSP chain,
      CWSDPMI, interrupt-hooked blocks and linked drivers, and DOS shows them as invulnerable.
-     `dos/tests/dosbox-pstest.sh`: 10/10 (two TSRs and an INT 60h hooker, classic and modern,
+     `dos/tests/dosbox-pstest.sh`: 10/10 (two TSRs and an INT F1h hooker, classic and modern,
      checked with `PSDPS.EXE`, the MCB chain as libpsd sees it). Not yet: device drivers under a
      real CONFIG.SYS (DOSBox-X loads none), real hardware.
    - ✅ **`psdoomd` + `net` backend on Linux/BSD/Haiku** (2026-11-04): `libpsd/psdoomd.c` serves a
