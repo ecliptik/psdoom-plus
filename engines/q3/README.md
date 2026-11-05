@@ -19,7 +19,16 @@ mod (`fs_game psdoom`, `vm_game 0`). OpenArena's own client game and menus are u
 
 ## Running it
 
-You need ioquake3 and OpenArena 0.8.8's data (on Debian: `apt install openarena`).
+You need OpenArena 0.8.8 and an engine for it:
+
+| OS | Packages | Engine `psdoom-q3` uses |
+|---|---|---|
+| Debian | `openarena` (`openarena-server` for a server) | ioquake3 |
+| FreeBSD | `openarena` or `openarena-server` | OpenArena's own (`oa_ded`): the ioquake3 port is 1.36, which can only run `baseq3` |
+| OpenBSD | `openarena` or `openarena-server` | OpenArena's own (`openarena-server`) |
+| NetBSD | `openarena` | ioquake3 (pkgsrc's 2020 snapshot) |
+
+Haiku has neither package, so Quake 3 isn't supported there yet.
 
 ```sh
 tools/psdev build q3                        # fetch OpenArena's game code, patch, build
@@ -32,7 +41,9 @@ build/q3/psdoom-q3 -dedicated -psuser www   # a server: players frag www's proce
 `psdoom-q3` passes psDooM's options to the game as the `ps_args` cvar, and everything from the
 first `+` on to ioquake3. It finds the engine and the data in the usual places; set
 `PSQ3_ENGINE`, `PSQ3_BASEPATH` (the directory with `baseoa/`) or `PSQ3_HOME` (default
-`~/.psdoom-q3`) if yours are elsewhere.
+`~/.psdoom-q3`) if yours are elsewhere. In `PSQ3_HOME` it links OpenArena's paks with
+`pak0.pk3` renamed, so that any ioquake3 runs OpenArena as a standalone game instead of
+checking it against id's Quake 3 data.
 
 | Cvar | Default | |
 |---|---|---|
@@ -54,5 +65,6 @@ first `+` on to ioquake3. It finds the engine and the data in the usual places; 
 
 ## Tests
 
-`tools/psdev test q3 --vm debian` runs the same real-signal test as the Doom engines
-(`tests/vm/doom-pstest.sh`) against ioquake3's dedicated server in a test guest.
+`tools/psdev test q3 --vm <os>` runs the same real-signal test as the Doom engines
+(`tests/vm/doom-pstest.sh`) against the dedicated server in a test guest: 8/8 on Debian,
+FreeBSD, OpenBSD and NetBSD.

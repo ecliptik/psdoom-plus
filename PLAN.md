@@ -389,9 +389,12 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    Penguin for protected ones). A hit renices, a frag kills, and a fragged bot stays down until
    libpsd answers. Only human players hurt them, and a root process needs a second frag.
    `psdoom-q3` maps psDooM's options to the `ps_args` cvar, so `tests/vm/doom-pstest.sh` drives the
-   dedicated server unchanged: tv-debian 8/8 with real signals. README screenshots are from the
+   dedicated server unchanged: 8/8 with real signals on Debian, FreeBSD, OpenBSD and NetBSD
+   (FreeBSD/OpenBSD use the OpenArena package's own engine, as FreeBSD's ioquake3 is 1.36;
+   the launcher links the paks with pak0 renamed so any ioquake3 runs OpenArena standalone).
+   Haiku has no ioquake3/OpenArena package: not supported yet. README screenshots are from the
    staged process table in tv-debian (Xvfb + llvmpipe). Stock OpenArena maps are used (their AAS);
-   no custom arena. Still to do: FreeBSD/OpenBSD (ports ship ioquake3 and OpenArena), Quake3e.
+   no custom arena. Still to do: Haiku, Quake3e.
 11. **Release**: ✅ **0.1.0** (2026-11-04): tag `v0.1.0` at `a188c21`, GitHub release with
     `CHANGELOG.md`'s notes and `psdoom-plus-0.1.0-dos.zip` (`make -C dos dist`; sha256
     `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,

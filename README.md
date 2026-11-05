@@ -12,7 +12,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | Chocolate Doom 3.1.1, Crispy Doom 7.2 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | Woof! 16.0.0, DSDA-Doom 0.30.1 | **playable**: Linux, FreeBSD, Haiku |
-| Quake 3: OpenArena 0.8.8 on ioquake3 | **playable**: Linux ([processes as bots](engines/q3/README.md)) |
+| Quake 3: OpenArena 0.8.8 on ioquake3 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD ([processes as bots](engines/q3/README.md)) |
 | Quake (stretch) | planned |
 
 Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for the og engine

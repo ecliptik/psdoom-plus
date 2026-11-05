@@ -36,6 +36,14 @@ mkdir -p "$HOME"
 PSDOOMUSER=$(id -un)
 export PSDOOMUSER
 
+# whatever happens, leave no sacrificial process behind: it would keep the
+# caller's ssh session open
+cleanup() {
+	for p in ${s1:-} ${s2:-} ${s3:-} ${s4:-} ${x1:-} ${x2:-}; do kill -9 "$p" 2>/dev/null; done
+	rm -rf "$work"
+}
+trap cleanup EXIT INT TERM
+
 pass=0
 fail=0
 ok()  { echo "  ok   $*"; pass=$((pass + 1)); }
@@ -104,6 +112,5 @@ else
 fi
 cp "$XDG_STATE_HOME/psdoom/actions.log" "$OUT/actions.log" 2>/dev/null
 
-rm -rf "$work"
 echo "== $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

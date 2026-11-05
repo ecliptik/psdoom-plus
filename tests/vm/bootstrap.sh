@@ -38,8 +38,10 @@ have_all() {
 		need git && need c++ && pkg-config --exists openal 2>/dev/null || return 1
 	fi
 	if [ $want_q3 -eq 1 ]; then
-		{ need ioq3ded || [ -x /usr/lib/ioquake3/ioq3ded ] || [ -x /usr/local/bin/ioq3ded ]; } &&
+		{ need ioq3ded || need oa_ded || need openarena-server || [ -x /usr/lib/ioquake3/ioq3ded ] ||
+		  [ -x /usr/pkg/lib/ioquake3/ioq3ded.x86_64 ]; } &&
 			ls /usr/lib/openarena-server/baseoa/pak0.pk3 /usr/local/share/openarena/baseoa/pak0.pk3 \
+				/usr/pkg/lib/openarena/baseoa/pak0.pk3 \
 				2>/dev/null | grep -q . || return 1
 	fi
 	if [ $want_dsda -eq 1 ]; then
@@ -78,6 +80,7 @@ FreeBSD)
 	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git glib libX11 libvpx openal-soft xorg-vfbserver mesa-dri"
 	[ $want_woof -eq 1 ] && pkgs="$pkgs git openal-soft"
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs sdl2_mixer libsndfile libzip libglvnd libGLU"
+	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena-server openarena-data"   # oa_ded: see psdoom-q3
 	# shellcheck disable=SC2086
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
@@ -96,11 +99,13 @@ OpenBSD)
 			doas ldconfig -m /usr/X11R6/lib
 		fi
 	fi
+	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena-server"
 	# shellcheck disable=SC2086
 	doas pkg_add -I $pkgs ;;
 NetBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf SDL3 SDL2"
+	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena"    # with ioquake3
 	# no pkgin in a minimal install: pkg_add from the binary package repo
 	repo="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -m)/$(uname -r | cut -d_ -f1)/All"
 	# shellcheck disable=SC2086

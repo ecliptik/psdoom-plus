@@ -61,12 +61,13 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
         -Wno-error=int-conversion)
 endif()
 
-# the launcher, next to the mod directory
-file(COPY psdoom-q3.sh DESTINATION ${CMAKE_BINARY_DIR}
-     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                      WORLD_READ WORLD_EXECUTE)
-file(RENAME ${CMAKE_BINARY_DIR}/psdoom-q3.sh ${CMAKE_BINARY_DIR}/psdoom-q3)
-add_custom_target(psdoom-q3 ALL DEPENDS qagame)
+# the launcher, next to the mod directory; only once the module has linked,
+# so a missing build/q3/psdoom-q3 means a failed build
+add_custom_target(psdoom-q3 ALL
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/psdoom-q3.sh
+            ${CMAKE_BINARY_DIR}/psdoom-q3
+    COMMAND chmod 755 ${CMAKE_BINARY_DIR}/psdoom-q3
+    DEPENDS qagame psdoom-q3.sh)
 
 install(TARGETS qagame LIBRARY DESTINATION lib/psdoom-plus/q3/psdoom)
 install(PROGRAMS psdoom-q3.sh DESTINATION bin RENAME psdoom-q3)
