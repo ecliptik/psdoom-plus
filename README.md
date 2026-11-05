@@ -12,7 +12,8 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | Chocolate Doom 3.1.1, Crispy Doom 7.2 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku |
 | GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | Woof! 16.0.0, DSDA-Doom 0.30.1 | **playable**: Linux, FreeBSD, Haiku |
-| Quake, Quake 3 (stretch) | planned |
+| Quake 3: OpenArena 0.8.8 on ioquake3 | **playable**: Linux ([processes as bots](engines/q3/README.md)) |
+| Quake (stretch) | planned |
 
 Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for the og engine
 (remote processes over the network, or local TSRs and drivers as monsters). Anything else (containers, pods,
@@ -40,6 +41,7 @@ build/og/psdoom-og -psclassic              # psDooM 2000: renice +5, kill -9, no
 tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-crispy
 tools/psdev build uzdoom                   # or gzdoom: build/uzdoom/psdoom-uzdoom (needs GL)
 tools/psdev build woof                     # or dsda: build/woof/psdoom-woof
+tools/psdev build q3                       # Quake 3: build/q3/psdoom-q3 (ioquake3 + OpenArena data)
 # another machine's processes: run psdoomd there, point any engine at it
 PSDOOMD_TOKEN=<secret> psdoomd -l 192.168.1.10:6666          # on the target (modern rules apply)
 PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
@@ -58,6 +60,13 @@ daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid a
 | ![GZDoom](docs/screenshots/gzdoom.png) GZDoom | ![UZDoom](docs/screenshots/uzdoom.png) UZDoom |
 | ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): COMMAND.COM and PSDOOM itself, both protected in modern mode | |
 
+Quake 3 (OpenArena on ioquake3, the same process table): processes are bots named
+`pid:command`, user processes are Grunts and daemons are Gargoyles.
+
+| | |
+|---|---|
+| ![Quake 3](docs/screenshots/q3.jpg) htop under the crosshair | ![Quake 3 scoreboard](docs/screenshots/q3-scores.jpg) the scoreboard |
+
 ## Layout
 
 | Path | What |
@@ -70,6 +79,7 @@ daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid a
 | `contrib/helpers/` | example psdoom-ng hook helpers: Docker containers, Kubernetes pods |
 | `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
 | `engines/<engine>/` | other engines: `UPSTREAM` pin and `patches/`; the source is fetched into `src/` |
+| `engines/q3/` | Quake 3: OpenArena's game code pin and patch, the bot glue, the `psdoom-q3` launcher ([README](engines/q3/README.md)) |
 | `engines/common/` | glue shared by the Doom-family engines (`psdoom/`) and by GZDoom/UZDoom (`zdoom/`, ZScript) |
 | `dos/` | the MS-DOS build of og (DJGPP + SDL3-DOS), the `mcb` backend's tools and tests ([README](dos/README.md)) |
 | `.sdl-dos-ports/` | the sdl-dos-ports hub's shared DOS layer (git subtree; don't edit here) |
@@ -81,7 +91,8 @@ daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid a
 - **Dennis Chao**: *Doom as an Interface for Process Management* (UNM, 1999), the original idea and code
 - **David Koppenhofer**: psDooM (2000), built on XDoom
 - **Udo Munk** and the XDoom contributors
-- **id Software**: Doom (source released under the GPL in 1999)
+- **id Software**: Doom (source released under the GPL in 1999) and Quake III Arena (2005)
+- the **OpenArena** team and the **ioquake3** project, for the free Quake 3 game and engine
 - psdoom-ng / psdoom-ng1 and kubedoom, for keeping the idea alive
 
 ## Licence

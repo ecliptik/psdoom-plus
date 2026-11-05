@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: psdoom-plus contributors <psdoom-plus@localhost>
+Date: Thu, 5 Nov 2026 13:46:18 -0800
+Subject: [PATCH] psDooM: processes as bots through libpsd
+
+Hooks for engines/q3/psdoom/g_psd.c: init/shutdown/frame, who may hurt a
+process bot, wound and frag (renice and kill), holding a fragged process
+bot down until libpsd answers, and dropping process bots left over from
+the last map. G_AddBot returns the new bot's client number.
+---
+ code/game/g_active.c |  3 +++
+ code/game/g_bot.c    | 13 +++++++------
+ code/game/g_client.c |  4 ++++
+ code/game/g_combat.c |  5 +++++
+ code/game/g_local.h  |  4 ++++
+ code/game/g_main.c   |  3 +++
+ 6 files changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/code/game/g_active.c b/code/game/g_active.c
+index d7c2311..378e9d2 100644
+--- a/code/game/g_active.c
++++ b/code/game/g_active.c
+@@ -1122,6 +1122,9 @@ void ClientThink_real( gentity_t *ent ) {
+ 		// In Last man standing, we force a quick respawn, since
+ 		// the player must be able to loose health
+ 		// pressing attack or use is the normal respawn method
++		if ( PSQ3_HoldRespawn( ent ) ) {
++			return;
++		}
+ 		if ( ( level.time > client->respawnTime ) &&
+ 			( ( ( g_forcerespawn.integer > 0 ) && 
+ 			( level.time - client->respawnTime  > g_forcerespawn.integer * 1000 ) ) ||
+diff --git a/code/game/g_bot.c b/code/game/g_bot.c
+index d7538bc..3c0a3e2 100644
+--- a/code/game/g_bot.c
++++ b/code/game/g_bot.c
+@@ -572,7 +572,7 @@ qboolean G_BotConnect( int clientNum, qboolean restart ) {
+ G_AddBot
+ ===============
+ */
+-static void G_AddBot( const char *name, float skill, const char *team, int delay, char *altname) {
++int G_AddBot( const char *name, float skill, const char *team, int delay, char *altname) {
+ 	int				clientNum;
+ 	char			*botinfo;
+ 	gentity_t		*bot;
+@@ -587,7 +587,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
+ 	botinfo = G_GetBotInfoByName( name );
+ 	if ( !botinfo ) {
+                 G_Printf( S_COLOR_RED "Error: Bot '%s' not defined\n", name );
+-		return;
++		return -1;
+ 	}
+ 
+ 	// create the bot's userinfo
+@@ -658,7 +658,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
+ 	s = Info_ValueForKey(botinfo, "aifile");
+ 	if (!*s ) {
+ 		trap_Printf( S_COLOR_RED "Error: bot has no aifile specified\n" );
+-		return;
++		return -1;
+ 	}
+ 
+ 	// have the server allocate a client slot
+@@ -666,7 +666,7 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
+ 	if ( clientNum == -1 ) {
+                 G_Printf( S_COLOR_RED "Unable to add bot.  All player slots are in use.\n" );
+                 G_Printf( S_COLOR_RED "Start server with more 'open' slots (or check setting of sv_maxclients cvar).\n" );
+-                return;
++                return -1;
+ 	}
+ 
+ 	// initialize the bot settings
+@@ -696,15 +696,16 @@ static void G_AddBot( const char *name, float skill, const char *team, int delay
+ 
+ 	// have it connect to the game as a normal client
+ 	if ( ClientConnect( clientNum, qtrue, qtrue ) ) {
+-		return;
++		return -1;
+ 	}
+ 
+ 	if( delay == 0 ) {
+ 		ClientBegin( clientNum );
+-		return;
++		return clientNum;
+ 	}
+ 
+ 	AddBotToSpawnQueue( clientNum, delay );
++	return clientNum;
+ }
+ 
+ 
+diff --git a/code/game/g_client.c b/code/game/g_client.c
+index e58ef91..bc8e1d6 100644
+--- a/code/game/g_client.c
++++ b/code/game/g_client.c
+@@ -1420,6 +1420,9 @@ char *ClientConnect( int clientNum, qboolean firstTime, qboolean isBot ) {
+ 	memset( client, 0, sizeof(*client) );
+ 
+ 	trap_GetUserinfo( clientNum, userinfo, sizeof( userinfo ) );
++	if ( isBot && !firstTime && PSQ3_StaleBot( userinfo ) ) {
++		return "process bot from an earlier map";
++	}
+ 
+  	value = Info_ValueForKey( userinfo, "cl_guid" );
+  	Q_strncpyz( client->pers.guid, value, sizeof( client->pers.guid ) );
+@@ -2114,6 +2117,7 @@ void ClientDisconnect( int clientNum ) {
+ 	// cleanup if we are kicking a bot that
+ 	// hasn't spawned yet
+ 	G_RemoveQueuedBotBegin( clientNum );
++	PSQ3_ClientGone( clientNum );
+ 
+ 	ent = g_entities + clientNum;
+ 	if ( !ent->client ) {
+diff --git a/code/game/g_combat.c b/code/game/g_combat.c
+index 8c61944..7a5b447 100644
+--- a/code/game/g_combat.c
++++ b/code/game/g_combat.c
+@@ -481,6 +481,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
+ 	if ( level.intermissiontime ) {
+ 		return;
+ 	}
++	PSQ3_Killed( self, attacker );
+ 
+ //unlagged - backward reconciliation #2
+ 	// make sure the body shows up in the client's current position
+@@ -1029,6 +1030,9 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
+ 	if (!targ->takedamage) {
+ 		return;
+ 	}
++	if ( !PSQ3_DamageAllowed( targ, attacker, mod ) ) {
++		return;
++	}
+ 
+ 	// the intermission has allready been qualified for, so don't
+ 	// allow any extra scoring
+@@ -1305,6 +1309,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker,
+ 		if ( targ->client ) {
+ 			targ->client->ps.stats[STAT_HEALTH] = targ->health;
+ 		}
++		PSQ3_Damaged( targ );
+ 			
+ 		if ( targ->health <= 0 ) {
+ 			if ( client )
+diff --git a/code/game/g_local.h b/code/game/g_local.h
+index 4b82323..7368fda 100644
+--- a/code/game/g_local.h
++++ b/code/game/g_local.h
+@@ -909,6 +909,7 @@ void G_CheckBotSpawn( void );
+ void G_RemoveQueuedBotBegin( int clientNum );
+ qboolean G_BotConnect( int clientNum, qboolean restart );
+ void Svcmd_AddBot_f( void );
++int G_AddBot( const char *name, float skill, const char *team, int delay, char *altname );
+ void Svcmd_BotList_f( void );
+ void BotInterbreedEndMatch( void );
+ 
+@@ -1389,3 +1390,6 @@ void Svcmd_MessageWrapper( void );
+ 
+ #include "g_killspree.h"
+ #include "g_admin.h"
++
++// psdoom-plus: processes as bots (engines/q3/psdoom/g_psd.c)
++#include "g_psd.h"
+diff --git a/code/game/g_main.c b/code/game/g_main.c
+index 48baac7..4332204 100644
+--- a/code/game/g_main.c
++++ b/code/game/g_main.c
+@@ -809,6 +809,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
+ 		BotAILoadMap( restart );
+ 		G_InitBots( restart );
+ 	}
++	PSQ3_Init( restart );
+ 
+ 	G_RemapTeamShaders();
+ 
+@@ -896,6 +897,7 @@ void G_ShutdownGame( int restart ) {
+     G_admin_cleanup( );
+     G_admin_namelog_cleanup( );
+ 
++	PSQ3_Shutdown( restart );
+ 	if ( trap_Cvar_VariableIntegerValue( "bot_enable" ) ) {
+ 		BotAIShutdown( restart );
+ 	}
+@@ -2739,6 +2741,7 @@ int start, end;
+ 
+ 	// get any cvar changes
+ 	G_UpdateCvars();
++	PSQ3_Frame();
+ 
+         if( (g_gametype.integer==GT_ELIMINATION || g_gametype.integer==GT_CTF_ELIMINATION) && !(g_elimflags.integer & EF_NO_FREESPEC) && g_elimination_lockspectator.integer>1)
+             trap_Cvar_Set("elimflags",va("%i",g_elimflags.integer|EF_NO_FREESPEC));

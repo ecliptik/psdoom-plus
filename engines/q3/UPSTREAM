@@ -1,0 +1,7 @@
+url=https://github.com/OpenArena/gamecode.git
+commit=1006052f780ca42db9ae17ea9226e2455952fbe5
+branch=oa-0.8.8
+target=psdoom-q3
+license=GPL-2.0-or-later (README.md "License", LICENSE)
+about=OpenArena gamecode (OAX), the game logic of OpenArena 0.8.8
+test_wrap=env PSQ3_DEDICATED=1

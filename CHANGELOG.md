@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Quake 3:** processes are bots named `pid:command`, in OpenArena 0.8.8 on the stock ioquake3
+  engine. psdoom-plus builds OpenArena's game logic with libpsd as a native mod: no engine
+  patch. A hit renices the process, and a frag kills it, with the same modes, protection and
+  audit log as the Doom engines. Daemons are Gargoyles, user processes Grunts. Tested with real
+  signals on Debian (`tools/psdev test q3 --vm debian`, 8/8). See `engines/q3/README.md`.
+
 ## 0.1.1 (2026-11-04)
 
 Fixes for Freedoom players, found while taking the README's screenshots.

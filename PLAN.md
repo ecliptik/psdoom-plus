@@ -382,9 +382,16 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 9. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
    builtins, plus a QuakeC mod (`psquake`) that spawns grunts/enforcers for processes and shamblers
    for daemons. Test assets: the shareware pak0 or LibreQuake.
-10. **Stretch: Quake 3**: no engine patch. A native `qagame` mod for ioquake3/Quake3e (`vm_game 0`)
-   links libpsd, and processes become bots named `pid:comm` (Q3 has no monsters). First hit renices,
-   a frag kills. Test assets: OpenArena (free), on a custom arena with AAS.
+10. **Stretch: Quake 3**: ✅ playable on Linux (2026-11-05). No engine patch: OpenArena's game code
+   (`OpenArena/gamecode` @ `oa-0.8.8`, GPL-2.0-or-later, matching Debian's OpenArena 0.8.8 data)
+   is built as a native `qagame` with libpsd (`engines/q3/`), and stock ioquake3 loads it as the
+   `psdoom` mod (`vm_game 0`). Processes are bots named `pid:comm` (Grunt, Gargoyle for daemons,
+   Penguin for protected ones). A hit renices, a frag kills, and a fragged bot stays down until
+   libpsd answers. Only human players hurt them, and a root process needs a second frag.
+   `psdoom-q3` maps psDooM's options to the `ps_args` cvar, so `tests/vm/doom-pstest.sh` drives the
+   dedicated server unchanged: tv-debian 8/8 with real signals. README screenshots are from the
+   staged process table in tv-debian (Xvfb + llvmpipe). Stock OpenArena maps are used (their AAS);
+   no custom arena. Still to do: FreeBSD/OpenBSD (ports ship ioquake3 and OpenArena), Quake3e.
 11. **Release**: ✅ **0.1.0** (2026-11-04): tag `v0.1.0` at `a188c21`, GitHub release with
     `CHANGELOG.md`'s notes and `psdoom-plus-0.1.0-dos.zip` (`make -C dos dist`; sha256
     `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,

@@ -16,12 +16,14 @@ want_zdoom=0            # GZDoom/UZDoom: C++, GL, a virtual X display
 want_woof=0             # Woof!: OpenAL, SDL3 >= 3.4 (built from git if older)
 want_dsda=0             # DSDA-Doom: SDL2_mixer, libsndfile, libzip, GL/GLU
 want_dos=0              # DOS: DOSBox-X runs PSDOOM.EXE against psdoomd
+want_q3=0               # Quake 3: ioquake3's dedicated server + OpenArena 0.8.8
 [ "${1:-}" = "engines" ] && want_engines=1
 [ "${1:-}" = "dos" ] && want_dos=1
 case "${2:-}" in
 gzdoom|uzdoom) want_zdoom=1 ;;
 woof) want_woof=1 ;;
 dsda) want_dsda=1 ;;
+q3) want_q3=1 ;;
 esac
 
 have_all() {
@@ -34,6 +36,11 @@ have_all() {
 	pkg-config --exists sdl3 sdl2 2>/dev/null || return 1
 	if [ $want_woof -eq 1 ]; then
 		need git && need c++ && pkg-config --exists openal 2>/dev/null || return 1
+	fi
+	if [ $want_q3 -eq 1 ]; then
+		{ need ioq3ded || [ -x /usr/lib/ioquake3/ioq3ded ] || [ -x /usr/local/bin/ioq3ded ]; } &&
+			ls /usr/lib/openarena-server/baseoa/pak0.pk3 /usr/local/share/openarena/baseoa/pak0.pk3 \
+				2>/dev/null | grep -q . || return 1
 	fi
 	if [ $want_dsda -eq 1 ]; then
 		need c++ && pkg-config --exists SDL2_mixer sndfile libzip zlib glu 2>/dev/null || return 1
@@ -59,9 +66,12 @@ Linux)
 	[ $want_woof -eq 1 ] && pkgs="$pkgs git libopenal-dev libasound2-dev"
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs libsdl2-mixer-dev libsndfile1-dev libzip-dev zlib1g-dev libgl-dev libglu1-mesa-dev"
 	[ $want_dos -eq 1 ] && pkgs="$pkgs dosbox-x freedoom"
+	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena-server"
 	sudo apt-get update -qq
 	# shellcheck disable=SC2086
-	sudo apt-get install -y -qq $pkgs >/dev/null ;;
+	sudo apt-get install -y -qq $pkgs >/dev/null
+	# the package starts a server on the port the tests use
+	[ $want_q3 -eq 1 ] && { sudo systemctl disable --now openarena-server >/dev/null 2>&1 || true; } ;;
 FreeBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf sdl3 sdl2"
