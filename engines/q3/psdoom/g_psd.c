@@ -135,6 +135,32 @@ static void test_note_removed( long pid ) {
 	}
 }
 
+// -pstest: a target takes the slot of a bot that isn't one (on a system with
+// more processes than client slots, idle targets would never get in)
+static qboolean make_room( const psd_proc *p ) {
+	int c;
+
+	if ( !test_state || fnmatch( test_glob, p->comm, 0 ) ) {
+		return qfalse;
+	}
+	for ( c = 0; c < MAX_CLIENTS; c++ ) {
+		const psd_proc *q;
+
+		if ( bots[c].state != PB_ALIVE ) {
+			continue;
+		}
+		q = psd_lookup( ctx, bots[c].pid );
+		if ( q && !fnmatch( test_glob, q->comm, 0 ) ) {
+			continue;
+		}
+		G_Printf( "psdoom: %ld leaves for test target %ld\n", bots[c].pid, p->pid );
+		bots[c].removing = qfalse;	// PSQ3_ClientGone: offer it again
+		trap_DropClient( c, "making room" );
+		return qtrue;
+	}
+	return qfalse;
+}
+
 static int on_event( void *user, psd_event ev, const psd_proc *p ) {
 	int	c = bot_for_pid( p->pid );
 	char	name[MAX_NETNAME], userinfo[MAX_INFO_STRING];
@@ -147,7 +173,7 @@ static int on_event( void *user, psd_event ev, const psd_proc *p ) {
 			bots[c].state = PB_ALIVE;
 			return 1;
 		}
-		if ( count_bots() >= max_bots ) {
+		if ( count_bots() >= max_bots && !make_room( p ) ) {
 			return 0;		// no room now: libpsd offers it again later
 		}
 		tmpl = p->is_protected ? ps_bot_protected.string
@@ -280,7 +306,11 @@ void PSQ3_Init( int restart ) {
 		psd_config_free( cfg );
 		return;
 	}
-	psd_config_set_max_procs( cfg, max_bots );
+	// libpsd keeps the busiest processes; -pstest needs its targets, busy
+	// or not (make_room)
+	if ( !arg_value( argc, argv, "-pstest" ) ) {
+		psd_config_set_max_procs( cfg, max_bots );
+	}
 
 	ctx = psd_open( cfg, &err );
 	psd_config_free( cfg );

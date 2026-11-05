@@ -27,8 +27,10 @@ You need OpenArena 0.8.8 and an engine for it:
 | FreeBSD | `openarena` or `openarena-server` | OpenArena's own (`oa_ded`): the ioquake3 port is 1.36, which can only run `baseq3` |
 | OpenBSD | `openarena` or `openarena-server` | OpenArena's own (`openarena-server`) |
 | NetBSD | `openarena` | ioquake3 (pkgsrc's 2020 snapshot) |
+| Haiku | none: `tools/psdev build ioq3`, and OpenArena 0.8.8's `baseoa/*.pk3` in `~/config/non-packaged/data/openarena/baseoa` | ioquake3 with a small Haiku patch (`engines/ioq3`) |
 
-Haiku has neither package, so Quake 3 isn't supported there yet.
+ioquake3 has never supported Haiku: `engines/ioq3` pins it with a platform patch, and only the
+dedicated server has been tested there so far.
 
 ```sh
 tools/psdev build q3                        # fetch OpenArena's game code, patch, build
@@ -67,4 +69,5 @@ checking it against id's Quake 3 data.
 
 `tools/psdev test q3 --vm <os>` runs the same real-signal test as the Doom engines
 (`tests/vm/doom-pstest.sh`) against the dedicated server in a test guest: 8/8 on Debian,
-FreeBSD, OpenBSD and NetBSD.
+FreeBSD, OpenBSD, NetBSD and Haiku. With more processes than client slots, `-pstest` lets its
+targets take the slots of other process bots.

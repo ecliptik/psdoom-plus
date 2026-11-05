@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: psdoom-plus contributors <psdoom-plus@localhost>
 Date: Thu, 5 Nov 2026 14:29:24 -0800
-Subject: [PATCH 2/2] BSD: amd64 and arm64 builds
+Subject: [PATCH 2/3] BSD: amd64 and arm64 builds
 
 q_platform.h knew only i386 and Alpha on the BSDs; name the others as
 ioquake3 does, so the module matches the engine's ARCH_STRING.

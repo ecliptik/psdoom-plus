@@ -37,7 +37,12 @@ have_all() {
 	if [ $want_woof -eq 1 ]; then
 		need git && need c++ && pkg-config --exists openal 2>/dev/null || return 1
 	fi
-	if [ $want_q3 -eq 1 ]; then
+	if [ $want_q3 -eq 1 ] && [ "$(uname -s)" = Haiku ]; then
+		# no package: engines/ioq3 is built here (see below); the data is
+		# copied in by tools/psdev
+		[ -x build/ioq3/Release/ioq3ded ] &&
+			[ -r /boot/home/config/non-packaged/data/openarena/baseoa/pak0.pk3 ] || return 1
+	elif [ $want_q3 -eq 1 ]; then
 		{ need ioq3ded || need oa_ded || need openarena-server || [ -x /usr/lib/ioquake3/ioq3ded ] ||
 		  [ -x /usr/pkg/lib/ioquake3/ioq3ded.x86_64 ]; } &&
 			ls /usr/lib/openarena-server/baseoa/pak0.pk3 /usr/local/share/openarena/baseoa/pak0.pk3 \
@@ -129,6 +134,12 @@ Haiku)
 		rm -rf /boot/system/packages/administrative/transaction-*
 		# shellcheck disable=SC2086
 		pkgman install -y $pkgs
+	fi
+	# no ioquake3 package for Haiku: build psdoom-plus's (engines/ioq3)
+	if [ $want_q3 -eq 1 ] && [ ! -x build/ioq3/Release/ioq3ded ]; then
+		cmake -S engines/ioq3/src -B build/ioq3 -DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_PROJECT_ioq3_INCLUDE="$PWD/engines/ioq3/psdoom.cmake" >/dev/null
+		cmake --build build/ioq3 --target ioq3ded -j2 >/dev/null
 	fi ;;
 *)
 	echo "bootstrap: don't know how to install on $os" >&2

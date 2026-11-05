@@ -1,0 +1,7 @@
+url=https://github.com/ioquake/ioq3.git
+commit=52088b9eae247d8e321c8dc1fb49a879652854f9
+target=ioq3ded
+license=GPL-2.0-or-later (COPYING.txt)
+project=ioq3
+cmake_include=ioq3/psdoom.cmake
+about=ioquake3, built only where no package has a usable one (Haiku); engines/q3 is the game

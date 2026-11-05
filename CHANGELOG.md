@@ -6,7 +6,8 @@
   engine. psdoom-plus builds OpenArena's game logic with libpsd as a native mod: no engine
   patch. A hit renices the process, and a frag kills it, with the same modes, protection and
   audit log as the Doom engines. Daemons are Gargoyles, user processes Grunts. Tested with real
-  signals on Debian, FreeBSD, OpenBSD and NetBSD (`tools/psdev test q3 --vm <os>`, 8/8 each).
+  signals on Debian, FreeBSD, OpenBSD, NetBSD and Haiku (`tools/psdev test q3 --vm <os>`, 8/8
+  each). Haiku has no ioquake3, so `engines/ioq3` builds one with a small platform patch.
   See `engines/q3/README.md`.
 - **Tests:** `doom-pstest.sh` kills its sacrificial processes on exit, so a failed run no longer
   keeps the test guest's ssh session open.

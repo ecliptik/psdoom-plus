@@ -392,9 +392,10 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    dedicated server unchanged: 8/8 with real signals on Debian, FreeBSD, OpenBSD and NetBSD
    (FreeBSD/OpenBSD use the OpenArena package's own engine, as FreeBSD's ioquake3 is 1.36;
    the launcher links the paks with pak0 renamed so any ioquake3 runs OpenArena standalone).
-   Haiku has no ioquake3/OpenArena package: not supported yet. README screenshots are from the
+   Haiku: no ioquake3 ever supported it, so `engines/ioq3` pins ioquake3 with a ~40-line platform
+   patch (dedicated server tested; 8/8). That port becomes its own project (ioq3 for Haiku). README screenshots are from the
    staged process table in tv-debian (Xvfb + llvmpipe). Stock OpenArena maps are used (their AAS);
-   no custom arena. Still to do: Haiku, Quake3e.
+   no custom arena. Still to do: the Haiku client (SDL2 + GL), Quake3e.
 11. **Release**: ✅ **0.1.0** (2026-11-04): tag `v0.1.0` at `a188c21`, GitHub release with
     `CHANGELOG.md`'s notes and `psdoom-plus-0.1.0-dos.zip` (`make -C dos dist`; sha256
     `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,

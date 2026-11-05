@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: psdoom-plus contributors <psdoom-plus@localhost>
+Date: Thu, 5 Nov 2026 15:05:27 -0800
+Subject: [PATCH] Haiku: platform block and libnetwork
+
+Haiku is POSIX with sockets in libnetwork; name it in q_platform.h as the
+BSDs are, so the dedicated server and client build there.
+---
+ cmake/platforms/unix.cmake |  4 ++++
+ code/qcommon/q_platform.h  | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/cmake/platforms/unix.cmake b/cmake/platforms/unix.cmake
+index c7f81dbc..7845f253 100644
+--- a/cmake/platforms/unix.cmake
++++ b/cmake/platforms/unix.cmake
+@@ -20,3 +20,7 @@ list(APPEND COMMON_LIBRARIES
+     ${CMAKE_DL_LIBS}    # Dynamic loader
+     m                   # Math library
+ )
++
++if(HAIKU)
++    list(APPEND COMMON_LIBRARIES network)   # sockets live in libnetwork
++endif()
+diff --git a/code/qcommon/q_platform.h b/code/qcommon/q_platform.h
+index 960f844e..c236009d 100644
+--- a/code/qcommon/q_platform.h
++++ b/code/qcommon/q_platform.h
+@@ -265,6 +265,38 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ 
+ #endif
+ 
++//================================================================= HAIKU ===
++
++#ifdef __HAIKU__
++
++#include <endian.h>
++
++#define OS_STRING "haiku"
++#define ID_INLINE inline
++#define PATH_SEP '/'
++
++#if defined __x86_64__
++#undef idx64
++#define idx64 1
++#define ARCH_STRING "x86_64"
++#define HAVE_VM_COMPILED
++#elif defined __i386__
++#define ARCH_STRING "x86"
++#define HAVE_VM_COMPILED
++#elif defined __aarch64__
++#define ARCH_STRING "arm64"
++#endif
++
++#if __BYTE_ORDER == __BIG_ENDIAN
++#define Q3_BIG_ENDIAN
++#else
++#define Q3_LITTLE_ENDIAN
++#endif
++
++#define DLL_EXT ".so"
++
++#endif
++
+ //================================================================= SUNOS ===
+ 
+ #ifdef __sun

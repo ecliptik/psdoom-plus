@@ -169,6 +169,18 @@ engine_vm() {
 		cmake $(configure_args "$e" '$HOME/psdoom-plus') >/dev/null &&
 		cmake --build build/$e --target $(upstream "$e" target) -j2 2>&1 | grep -E 'error|warning: implicit' ; test -x build/$e/psdoom-$e" ||
 		die "build failed on tv-$os"
+	if [ "$e" = q3 ] && [ "$os" = haiku ]; then
+		# OpenArena's data has no Haiku package: copy it from a local cache
+		# (the pk3s of Debian's openarena-*data packages, for example)
+		q3data=${PSQ3_DATA:-$HOME/.cache/psdoom-plus/openarena/baseoa}
+		d=/boot/home/config/non-packaged/data/openarena/baseoa
+		if ! ssh "tv-$os" "test -r $d/pak0.pk3"; then
+			[ -r "$q3data/pak0.pk3" ] || die "no OpenArena data in $q3data (set PSQ3_DATA)"
+			echo "== copying OpenArena's data to tv-$os"
+			ssh "tv-$os" "mkdir -p $d"
+			scp -q "$q3data"/*.pk3 "tv-$os:$d/"
+		fi
+	fi
 	iwad=$(ssh "tv-$os" 'for f in /usr/share/games/doom/freedoom1.wad /usr/local/share/games/doom/freedoom1.wad /usr/local/share/doom/freedoom1.wad "$HOME/freedoom1.wad"; do [ -r "$f" ] && echo "$f" && break; done; true')
 	if [ -z "$iwad" ]; then
 		echo "== copying freedoom1.wad to tv-$os"

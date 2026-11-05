@@ -66,6 +66,10 @@ case $(uname -s) in
 esac
 if [ -n "${PSQ3_ENGINE:-}" ]; then
 	engine=$PSQ3_ENGINE
+elif [ "$dedicated" = 1 ] && [ -x "$here/../ioq3/Release/ioq3ded" ]; then
+	engine=$here/../ioq3/Release/ioq3ded	# tools/psdev build ioq3 (Haiku)
+elif [ "$dedicated" = 0 ] && [ -x "$here/../ioq3/Release/ioquake3" ]; then
+	engine=$here/../ioq3/Release/ioquake3
 elif [ "$dedicated" = 1 ]; then
 	# shellcheck disable=SC2086
 	engine=$(find_engine $ded)
@@ -79,6 +83,7 @@ base=${PSQ3_BASEPATH:-}
 if [ -z "$base" ]; then
 	for d in /usr/lib/openarena /usr/lib/openarena-server /usr/share/games/openarena \
 		/usr/local/share/openarena /usr/local/share/games/openarena /usr/pkg/lib/openarena \
+		/boot/system/data/openarena /boot/home/config/non-packaged/data/openarena \
 		"$HOME/openarena"; do
 		ls "$d"/baseoa/pak0.pk3 >/dev/null 2>&1 && base=$d && break
 	done
