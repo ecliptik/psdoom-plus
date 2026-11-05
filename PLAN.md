@@ -388,15 +388,17 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
 11. **Release**: ✅ **0.1.0** (2026-11-04): tag `v0.1.0` at `a188c21`, GitHub release with
     `CHANGELOG.md`'s notes and `psdoom-plus-0.1.0-dos.zip` (`make -C dos dist`; sha256
     `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,
-    Woof! 8/8, DOS via psdoomd 6/6. Still to come: tagged source releases; optionally a kubedoom-compatible image built on
+    Woof! 8/8, DOS via psdoomd 6/6. ✅ **0.1.1** (2026-11-05): tag `v0.1.1` at `3afa647`
+    (texture merging in og/Chocolate, DSDA-Doom with Freedoom 2, `-pstest` fails fast), GitHub
+    release with `psdoom-plus-0.1.1-dos.zip` (sha256 `b83f0996…`, checked after upload). Still to come: tagged source releases; optionally a kubedoom-compatible image built on
     psdoom-plus (offered upstream to kubedoom rather than as a rival); packaging (AUR, FreeBSD port, HaikuPorts recipe) as
     follow-up.
 
 ## Open items
 
-- `gh`'s stored token on the claude VM is invalid. We use `pass:hosts/claude/github-release-token`
-  instead (verified: it can see psdoom-plus with push rights). Whether the fine-grained token
-  includes this repo is only proven by the first push.
+- `gh`'s stored token on the claude VM is invalid. Pushes and `gh release` use
+  `pass:hosts/claude/github-release-token` (an inline credential helper / `GH_TOKEN=` per command);
+  proven by the v0.1.1 tag push and release.
 - IWADs: Freedoom for tests. Should commercial IWADs (for the stock-E1M1 courtyard path) be tested
   manually on the owner's own machine?
 - The claude VM and jezebel reboot tonight (2026-11-03), and any running guest will stop then.
