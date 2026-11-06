@@ -239,11 +239,35 @@ static void test_note_removed (long pid)
 		}
 }
 
+// -pstest: a target takes the place of a monster that isn't one (on a system
+// with more processes than ps_monsters, idle targets would never get in)
+static qboolean make_room (const psd_proc *p)
+{
+	int i;
+
+	if (!test_state || fnmatch (test_glob, p->comm, 0))
+		return false;
+	for (i = 0; i < nmons; i++)
+	{
+		const psd_proc	*q = psd_lookup (ctx, mons[i].pid);
+		edict_t		*e = mon_edict (&mons[i]);
+
+		if (mons[i].state != PM_ALIVE || e->free || (q && !fnmatch (test_glob, q->comm, 0)))
+			continue;
+		Con_Printf ("psdoom: %ld leaves for test target %ld\n", mons[i].pid, p->pid);
+		vanish (e);
+		psd_forget (ctx, mons[i].pid);	// offered again later
+		drop_mon (&mons[i]);
+		return true;
+	}
+	return false;
+}
+
 static int add_mon (const psd_proc *p)
 {
 	edict_t *e;
 
-	if (nmons >= PSQ_MAX || nmons >= ps_monsters.value)
+	if ((nmons >= PSQ_MAX || nmons >= ps_monsters.value) && !make_room (p))
 		return 0;
 	e = spawn_process (p);
 	if (!e)

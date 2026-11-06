@@ -56,5 +56,5 @@ start a game from the menu or type `map e1m1` in the console. With registered Qu
 
 `tools/psdev test quake --vm <os>` runs the same real-signal test as the Doom engines
 (`tests/vm/doom-pstest.sh`) against a one-slot dedicated server with the shareware data (on
-the `start` map, since shareware ignores `+map`). Tested 8/8 on Debian, FreeBSD, OpenBSD and
-NetBSD. The data comes from `~/.cache/psdoom-plus/quake/id1/pak0.pak` (`PSQUAKE_DATA`).
+the `start` map, since shareware ignores `+map`). Tested 8/8 on Debian, FreeBSD, OpenBSD,
+NetBSD and Haiku. The data comes from `~/.cache/psdoom-plus/quake/id1/pak0.pak` (`PSQUAKE_DATA`).

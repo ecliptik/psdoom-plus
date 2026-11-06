@@ -13,7 +13,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | Woof! 16.0.0, DSDA-Doom 0.30.1 | **playable**: Linux, FreeBSD, Haiku |
 | Quake 3: OpenArena 0.8.8 on ioquake3 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku ([processes as bots](engines/q3/README.md)) |
-| Quake: QuakeSpasm 0.97.0 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD ([processes as monsters](engines/quake/README.md)) |
+| Quake: QuakeSpasm 0.97.0 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku ([processes as monsters](engines/quake/README.md)) |
 
 Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for the og engine
 (remote processes over the network, or local TSRs and drivers as monsters). Anything else (containers, pods,
@@ -98,7 +98,8 @@ Quake 3 (OpenArena on ioquake3, the same process table): processes are bots name
 - **Dennis Chao**: *Doom as an Interface for Process Management* (UNM, 1999), the original idea and code
 - **David Koppenhofer**: psDooM (2000), built on XDoom
 - **Udo Munk** and the XDoom contributors
-- **id Software**: Doom (source released under the GPL in 1999) and Quake III Arena (2005)
+- **id Software**: Doom (source released under the GPL in 1999), Quake (1999) and Quake III Arena (2005)
+- the **QuakeSpasm** team, for the Quake engine
 - the **OpenArena** team and the **ioquake3** project, for the free Quake 3 game and engine
 - psdoom-ng / psdoom-ng1 and kubedoom, for keeping the idea alive
 

@@ -387,7 +387,8 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    precaching only while a map loads, so each map pre-spawns one of each kind. Test data: the
    shareware pak0 (quake106.zip). Shareware ignores `+commands` (id's rule), so the tests run a
    one-slot dedicated server (no deathmatch) on `start`. Real signals 8/8 on Debian, FreeBSD,
-   OpenBSD and NetBSD; Haiku next. Ironwail/vkQuake not tried.
+   OpenBSD, NetBSD and Haiku (as in Quake 3, a test target takes the place of a monster that
+   isn't one, since Haiku has more processes than `ps_monsters`). Ironwail/vkQuake not tried.
 10. **Stretch: Quake 3**: ✅ playable on Linux (2026-11-05). No engine patch: OpenArena's game code
    (`OpenArena/gamecode` @ `oa-0.8.8`, GPL-2.0-or-later, matching Debian's OpenArena 0.8.8 data)
    is built as a native `qagame` with libpsd (`engines/q3/`), and stock ioquake3 loads it as the
