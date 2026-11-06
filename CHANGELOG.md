@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Quake:** processes are monsters in QuakeSpasm 0.97.0: Grunts for user processes, Fiends for
+  daemons, Zombies for protected ones, with `pid:command` shown while you look at one. A small
+  engine patch watches QuakeC's `T_Damage` and `Killed`, so id's own `progs.dat` (shareware or
+  registered) runs unchanged. Tested with real signals on Debian, FreeBSD, OpenBSD and NetBSD
+  (8/8 each). See `engines/quake/README.md`.
 - **Quake 3:** processes are bots named `pid:command`, in OpenArena 0.8.8 on the stock ioquake3
   engine. psdoom-plus builds OpenArena's game logic with libpsd as a native mod: no engine
   patch. A hit renices the process, and a frag kills it, with the same modes, protection and

@@ -724,7 +724,7 @@ static void test_frame (void)
 		if (sv.time >= test_shot_at)
 		{
 			if (test_shot)
-				Cbuf_AddText (va ("screenshot %s\nwait\nwait\n", test_shot));
+				Cbuf_AddText ("screenshot png\nwait\nwait\n");	// id1/spasmNNNN.png
 			test_finish (test_ntargets > 0 && test_nremoved == test_ntargets);
 		}
 	}

@@ -379,9 +379,15 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
    signals) for both on Debian, FreeBSD and Haiku. Not yet covered by `-pstest`: save/rewind
    re-adoption (works by construction; with the asynchronous `cmd` backend the first poll after a
    restore may come back empty, so restored monsters vanish and respawn on the next poll).
-9. **Stretch: Quake**: patch the Ironwail/QuakeSpasm/vkQuake family (one shared series) with libpsd
-   builtins, plus a QuakeC mod (`psquake`) that spawns grunts/enforcers for processes and shamblers
-   for daemons. Test assets: the shareware pak0 or LibreQuake.
+9. **Stretch: Quake**: ✅ playable (2026-11-05). QuakeSpasm 0.97.0 (`engines/quake/`) with a
+   five-hook patch, and **no QuakeC mod** after all: the glue spawns monsters through the game's
+   own spawn functions (Grunt/Fiend/Zombie for user/daemon/protected; shareware has no Enforcer)
+   and the interpreter's OP_CALL reports `T_Damage` (blocked unless a player hits a process
+   monster) and `Killed` (kill). Labels are a centre-print while you look at one. Quake allows
+   precaching only while a map loads, so each map pre-spawns one of each kind. Test data: the
+   shareware pak0 (quake106.zip). Shareware ignores `+commands` (id's rule), so the tests run a
+   one-slot dedicated server (no deathmatch) on `start`. Real signals 8/8 on Debian, FreeBSD,
+   OpenBSD and NetBSD; Haiku next. Ironwail/vkQuake not tried.
 10. **Stretch: Quake 3**: ✅ playable on Linux (2026-11-05). No engine patch: OpenArena's game code
    (`OpenArena/gamecode` @ `oa-0.8.8`, GPL-2.0-or-later, matching Debian's OpenArena 0.8.8 data)
    is built as a native `qagame` with libpsd (`engines/q3/`), and stock ioquake3 loads it as the

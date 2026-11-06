@@ -13,7 +13,7 @@ killing it kills the process. psdoom-plus brings that back on top of current eng
 | GZDoom 4.14.2, UZDoom 5.0.3 | **playable**: Linux, FreeBSD, Haiku |
 | Woof! 16.0.0, DSDA-Doom 0.30.1 | **playable**: Linux, FreeBSD, Haiku |
 | Quake 3: OpenArena 0.8.8 on ioquake3 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD, Haiku ([processes as bots](engines/q3/README.md)) |
-| Quake (stretch) | planned |
+| Quake: QuakeSpasm 0.97.0 | **playable**: Linux, FreeBSD, OpenBSD, NetBSD ([processes as monsters](engines/quake/README.md)) |
 
 Platforms: Linux, FreeBSD, OpenBSD, NetBSD, DragonFly and Haiku, plus MS-DOS for the og engine
 (remote processes over the network, or local TSRs and drivers as monsters). Anything else (containers, pods,
@@ -42,6 +42,7 @@ tools/psdev build crispy                   # or chocolate: build/crispy/psdoom-c
 tools/psdev build uzdoom                   # or gzdoom: build/uzdoom/psdoom-uzdoom (needs GL)
 tools/psdev build woof                     # or dsda: build/woof/psdoom-woof
 tools/psdev build q3                       # Quake 3: build/q3/psdoom-q3 (ioquake3 + OpenArena data)
+tools/psdev build quake                    # Quake: build/quake/psdoom-quake (Quake's id1/pak0.pak)
 # another machine's processes: run psdoomd there, point any engine at it
 PSDOOMD_TOKEN=<secret> psdoomd -l 192.168.1.10:6666          # on the target (modern rules apply)
 PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
@@ -59,6 +60,11 @@ daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid a
 | ![Woof!](docs/screenshots/woof.png) Woof! | ![DSDA-Doom](docs/screenshots/dsda.png) DSDA-Doom |
 | ![GZDoom](docs/screenshots/gzdoom.png) GZDoom | ![UZDoom](docs/screenshots/uzdoom.png) UZDoom |
 | ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): COMMAND.COM and PSDOOM itself, both protected in modern mode | |
+
+Quake (shareware E1M1, the same process table): daemons are Fiends and user processes Grunts;
+the label shows while you look at one.
+
+![Quake](docs/screenshots/quake.png)
 
 Quake 3 (OpenArena on ioquake3, the same process table): processes are bots named
 `pid:command`, user processes are Grunts and daemons are Gargoyles.
@@ -79,6 +85,7 @@ Quake 3 (OpenArena on ioquake3, the same process table): processes are bots name
 | `contrib/helpers/` | example psdoom-ng hook helpers: Docker containers, Kubernetes pods |
 | `engines/og/` | og: upstream pin, patch series, SDL3 platform layer, psDooM glue |
 | `engines/<engine>/` | other engines: `UPSTREAM` pin and `patches/`; the source is fetched into `src/` |
+| `engines/quake/` | Quake: QuakeSpasm pin and patch, the monster glue, the `psdoom-quake` launcher ([README](engines/quake/README.md)) |
 | `engines/q3/` | Quake 3: OpenArena's game code pin and patch, the bot glue, the `psdoom-q3` launcher ([README](engines/q3/README.md)) |
 | `engines/common/` | glue shared by the Doom-family engines (`psdoom/`) and by GZDoom/UZDoom (`zdoom/`, ZScript) |
 | `dos/` | the MS-DOS build of og (DJGPP + SDL3-DOS), the `mcb` backend's tools and tests ([README](dos/README.md)) |
