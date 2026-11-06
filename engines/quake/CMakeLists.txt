@@ -7,7 +7,7 @@
 # progs.dat (id's, shareware or registered): no QuakeC changes.
 # psdoom-quake (from psdoom-quake.sh) finds the data and starts it.
 cmake_minimum_required(VERSION 3.16)
-project(psdoom-quake VERSION 0.1.1 LANGUAGES C)
+project(psdoom-quake VERSION 0.2.0 LANGUAGES C)
 
 set(QS ${CMAKE_CURRENT_SOURCE_DIR}/src/Quake)
 if(NOT EXISTS ${QS}/host.c)

@@ -7,7 +7,7 @@
 # the "psdoom" mod directory (vm_game 0), with OpenArena 0.8.8's data.
 # psdoom-q3 (from psdoom-q3.sh) starts it.
 cmake_minimum_required(VERSION 3.16)
-project(psdoom-q3 VERSION 0.1.1 LANGUAGES C)
+project(psdoom-q3 VERSION 0.2.0 LANGUAGES C)
 
 set(Q3_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/code)
 if(NOT EXISTS ${Q3_SRC}/game/g_main.c)

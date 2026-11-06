@@ -408,7 +408,11 @@ tv-\* guest), then the hub's vcctrl rigs on real 486/Pentium hardware, following
     `b11e3b5a…`). Release checks in tv-debian with real signals: libpsd 5/5, og 8/8, Chocolate 8/8,
     Woof! 8/8, DOS via psdoomd 6/6. ✅ **0.1.1** (2026-11-05): tag `v0.1.1` at `3afa647`
     (texture merging in og/Chocolate, DSDA-Doom with Freedoom 2, `-pstest` fails fast), GitHub
-    release with `psdoom-plus-0.1.1-dos.zip` (sha256 `b83f0996…`, checked after upload). Still to come: tagged source releases; optionally a kubedoom-compatible image built on
+    release with `psdoom-plus-0.1.1-dos.zip` (sha256 `b83f0996…`, checked after upload). ✅ **0.2.0**
+    (2026-11-06): Quake and Quake 3; tag `v0.2.0`, GitHub release with `psdoom-plus-0.2.0-dos.zip`
+    (sha256 `195bb7ef…`). Release checks in tv-debian with real signals: libpsd 5/5, og,
+    Chocolate, Woof!, Quake and Quake 3 8/8, DOS via psdoomd 6/6; Quake and Quake 3 8/8 on all five
+    guests. Still to come: tagged source releases; optionally a kubedoom-compatible image built on
     psdoom-plus (offered upstream to kubedoom rather than as a rival); packaging (AUR, FreeBSD port, HaikuPorts recipe) as
     follow-up.
 

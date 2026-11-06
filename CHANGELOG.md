@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-06)
+
+Quake and Quake 3 join the Doom engines: processes are Quake monsters, or Quake 3 bots named
+`pid:command`, with the same kill modes, protection and audit log.
 
 - **Quake:** processes are monsters in QuakeSpasm 0.97.0: Grunts for user processes, Fiends for
   daemons, Zombies for protected ones, with `pid:command` shown while you look at one. A small

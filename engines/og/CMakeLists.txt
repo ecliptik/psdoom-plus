@@ -3,7 +3,7 @@
 #
 # Build the fetched+patched tree:   tools/psdev build og
 cmake_minimum_required(VERSION 3.16)
-project(psdoom-og VERSION 0.1.1 LANGUAGES C)
+project(psdoom-og VERSION 0.2.0 LANGUAGES C)
 
 set(OG_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/linuxdoom-1.10)
 if(NOT EXISTS ${OG_SRC}/d_main.c)

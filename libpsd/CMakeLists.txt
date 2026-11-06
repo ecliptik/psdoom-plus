@@ -1,7 +1,7 @@
 # libpsd - processes as monsters
 # SPDX-License-Identifier: GPL-2.0-or-later
 cmake_minimum_required(VERSION 3.13)
-project(libpsd VERSION 0.1.1 LANGUAGES C)
+project(libpsd VERSION 0.2.0 LANGUAGES C)
 
 option(PSD_BUILD_TESTS "Build libpsd unit tests" ON)
 option(PSD_WERROR "Treat warnings as errors" OFF)
