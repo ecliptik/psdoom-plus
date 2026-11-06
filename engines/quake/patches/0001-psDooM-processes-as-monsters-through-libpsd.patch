@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: psdoom-plus contributors <psdoom-plus@localhost>
+Date: Thu, 5 Nov 2026 16:01:56 -0800
+Subject: [PATCH] psDooM: processes as monsters through libpsd
+
+Hooks for engines/quake/psdoom/sv_psd.c: map end and load, the server
+frame, shutdown, ED_Free, and every QuakeC call (PR_ExecuteProgram's
+OP_CALL), which lets the glue watch T_Damage and Killed without
+changing the game's QuakeC.
+---
+ Quake/host.c     | 5 +++++
+ Quake/pr_edict.c | 2 ++
+ Quake/pr_exec.c  | 3 +++
+ Quake/sv_main.c  | 3 +++
+ 4 files changed, 13 insertions(+)
+
+diff --git a/Quake/host.c b/Quake/host.c
+index 871c244..db27939 100644
+--- a/Quake/host.c
++++ b/Quake/host.c
+@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ // host.c -- coordinates spawning and killing of local servers
+ 
+ #include "quakedef.h"
++#include "sv_psd.h"	// psdoom-plus
+ #include "bgmusic.h"
+ #include <setjmp.h>
+ 
+@@ -648,7 +649,10 @@ void Host_ServerFrame (void)
+ // move things around and think
+ // always pause in single player if in console or menus
+ 	if (!sv.paused && (svs.maxclients > 1 || key_dest == key_game) )
++	{
+ 		SV_Physics ();
++		PSQ_Frame ();		// psdoom-plus
++	}
+ 
+ //johnfitz -- devstats
+ 	if (cls.signon == SIGNONS)
+@@ -927,6 +931,7 @@ void Host_Shutdown(void)
+ // keep Con_Printf from trying to update the screen
+ 	scr_disabled_for_loading = true;
+ 
++	PSQ_Shutdown ();	// psdoom-plus
+ 	Host_WriteConfiguration ();
+ 
+ 	NET_Shutdown ();
+diff --git a/Quake/pr_edict.c b/Quake/pr_edict.c
+index 655fcbc..d63f299 100644
+--- a/Quake/pr_edict.c
++++ b/Quake/pr_edict.c
+@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ // sv_edict.c -- entity dictionary
+ 
+ #include "quakedef.h"
++#include "sv_psd.h"	// psdoom-plus
+ 
+ dprograms_t		*progs;
+ dfunction_t		*pr_functions;
+@@ -146,6 +147,7 @@ FIXME: walk all entities and NULL out references to this entity
+ */
+ void ED_Free (edict_t *ed)
+ {
++	PSQ_Freed (ed);			// psdoom-plus
+ 	SV_UnlinkEdict (ed);		// unlink from world bsp
+ 
+ 	ed->free = true;
+diff --git a/Quake/pr_exec.c b/Quake/pr_exec.c
+index 55efd7e..972eac4 100644
+--- a/Quake/pr_exec.c
++++ b/Quake/pr_exec.c
+@@ -20,6 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ */
+ 
+ #include "quakedef.h"
++#include "sv_psd.h"	// psdoom-plus
+ 
+ typedef struct
+ {
+@@ -608,6 +609,8 @@ void PR_ExecuteProgram (func_t fnum)
+ 		if (!OPA->function)
+ 			PR_RunError("NULL function");
+ 		newf = &pr_functions[OPA->function];
++		if (PSQ_Call (newf))	// psdoom-plus: a hit a process monster mustn't take
++			break;
+ 		if (newf->first_statement < 0)
+ 		{ // Built-in function
+ 			int i = -newf->first_statement;
+diff --git a/Quake/sv_main.c b/Quake/sv_main.c
+index da8d48c..fa150b6 100644
+--- a/Quake/sv_main.c
++++ b/Quake/sv_main.c
+@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ // sv_main.c -- server main program
+ 
+ #include "quakedef.h"
++#include "sv_psd.h"	// psdoom-plus
+ 
+ server_t	sv;
+ server_static_t	svs;
+@@ -1472,6 +1473,7 @@ void SV_SpawnServer (const char *server)
+ 
+ 	Con_DPrintf ("SpawnServer: %s\n",server);
+ 	svs.changelevel_issued = false;		// now safe to issue another
++	PSQ_MapEnd ();				// psdoom-plus
+ 
+ //
+ // tell all connected clients that we are going to a new level
+@@ -1592,6 +1594,7 @@ void SV_SpawnServer (const char *server)
+ 	pr_global_struct->serverflags = svs.serverflags;
+ 
+ 	ED_LoadFromFile (sv.worldmodel->entities);
++	PSQ_MapLoaded ();			// psdoom-plus: processes as monsters
+ 
+ 	sv.active = true;
+ 

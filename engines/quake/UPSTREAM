@@ -1,0 +1,7 @@
+url=https://github.com/sezero/quakespasm.git
+commit=e8795a79273f2823661727265d0617106e282bea
+tag=quakespasm-0.97.0
+target=psdoom-quake
+license=GPL-2.0-or-later (Quake/gnu.txt, file headers)
+about=QuakeSpasm 0.97.0, the Quake 1 engine: processes as monsters (engines/quake/psdoom)
+test_wrap=env PSQUAKE_DEDICATED=1

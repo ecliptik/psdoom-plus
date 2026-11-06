@@ -181,6 +181,14 @@ engine_vm() {
 			scp -q "$q3data"/*.pk3 "tv-$os:$d/"
 		fi
 	fi
+	if [ "$e" = quake ]; then
+		# Quake's shareware data (id1/pak0.pak, freely redistributable but
+		# not in this repo), next to the engine
+		qdata=${PSQUAKE_DATA:-$HOME/.cache/psdoom-plus/quake}
+		[ -r "$qdata/id1/pak0.pak" ] || die "no Quake data in $qdata/id1 (set PSQUAKE_DATA)"
+		ssh "tv-$os" 'mkdir -p psdoom-plus/build/quake/id1'
+		scp -q "$qdata/id1/pak0.pak" "tv-$os:psdoom-plus/build/quake/id1/"
+	fi
 	iwad=$(ssh "tv-$os" 'for f in /usr/share/games/doom/freedoom1.wad /usr/local/share/games/doom/freedoom1.wad /usr/local/share/doom/freedoom1.wad "$HOME/freedoom1.wad"; do [ -r "$f" ] && echo "$f" && break; done; true')
 	if [ -z "$iwad" ]; then
 		echo "== copying freedoom1.wad to tv-$os"

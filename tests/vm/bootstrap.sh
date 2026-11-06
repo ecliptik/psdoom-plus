@@ -17,6 +17,7 @@ want_woof=0             # Woof!: OpenAL, SDL3 >= 3.4 (built from git if older)
 want_dsda=0             # DSDA-Doom: SDL2_mixer, libsndfile, libzip, GL/GLU
 want_dos=0              # DOS: DOSBox-X runs PSDOOM.EXE against psdoomd
 want_q3=0               # Quake 3: ioquake3's dedicated server + OpenArena 0.8.8
+want_quake=0            # Quake: SDL2 + OpenGL headers (QuakeSpasm)
 [ "${1:-}" = "engines" ] && want_engines=1
 [ "${1:-}" = "dos" ] && want_dos=1
 case "${2:-}" in
@@ -24,6 +25,7 @@ gzdoom|uzdoom) want_zdoom=1 ;;
 woof) want_woof=1 ;;
 dsda) want_dsda=1 ;;
 q3) want_q3=1 ;;
+quake) want_quake=1 ;;
 esac
 
 have_all() {
@@ -48,6 +50,10 @@ have_all() {
 			ls /usr/lib/openarena-server/baseoa/pak0.pk3 /usr/local/share/openarena/baseoa/pak0.pk3 \
 				/usr/pkg/lib/openarena/baseoa/pak0.pk3 \
 				2>/dev/null | grep -q . || return 1
+	fi
+	if [ $want_quake -eq 1 ]; then
+		pkg-config --exists gl 2>/dev/null || [ -e /boot/system/develop/headers/os/opengl/GL/gl.h ] ||
+			[ -e /boot/system/develop/headers/GL/gl.h ] || return 1
 	fi
 	if [ $want_dsda -eq 1 ]; then
 		need c++ && pkg-config --exists SDL2_mixer sndfile libzip zlib glu 2>/dev/null || return 1
@@ -74,6 +80,7 @@ Linux)
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs libsdl2-mixer-dev libsndfile1-dev libzip-dev zlib1g-dev libgl-dev libglu1-mesa-dev"
 	[ $want_dos -eq 1 ] && pkgs="$pkgs dosbox-x freedoom"
 	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena-server"
+	[ $want_quake -eq 1 ] && pkgs="$pkgs libgl-dev"
 	sudo apt-get update -qq
 	# shellcheck disable=SC2086
 	sudo apt-get install -y -qq $pkgs >/dev/null
@@ -86,6 +93,7 @@ FreeBSD)
 	[ $want_woof -eq 1 ] && pkgs="$pkgs git openal-soft"
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs sdl2_mixer libsndfile libzip libglvnd libGLU"
 	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena-server openarena-data"   # oa_ded: see psdoom-q3
+	[ $want_quake -eq 1 ] && pkgs="$pkgs libglvnd"
 	# shellcheck disable=SC2086
 	sudo env ASSUME_ALWAYS_YES=yes pkg install -q $pkgs ;;
 OpenBSD)
@@ -111,6 +119,7 @@ NetBSD)
 	pkgs="cmake"
 	[ $want_engines -eq 1 ] && pkgs="$pkgs pkgconf SDL3 SDL2"
 	[ $want_q3 -eq 1 ] && pkgs="$pkgs openarena"    # with ioquake3
+	[ $want_quake -eq 1 ] && pkgs="$pkgs MesaLib"
 	# no pkgin in a minimal install: pkg_add from the binary package repo
 	repo="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -m)/$(uname -r | cut -d_ -f1)/All"
 	# shellcheck disable=SC2086
@@ -121,6 +130,7 @@ Haiku)
 	[ $want_zdoom -eq 1 ] && pkgs="$pkgs git libvpx_devel openal_devel mesa_devel glib2_devel"
 	[ $want_woof -eq 1 ] && pkgs="$pkgs git openal_devel"
 	[ $want_dsda -eq 1 ] && pkgs="$pkgs sdl2_mixer_devel libsndfile_devel libzip_devel zlib_devel mesa_devel glu_devel"
+	[ $want_quake -eq 1 ] && pkgs="$pkgs mesa_devel"
 	# The tv-haiku image carries an inactive zlib_devel .hpkg in
 	# /boot/system/packages, which makes any transaction that pulls it in
 	# fail ("... already exists"): move such a stale file aside, retry once
