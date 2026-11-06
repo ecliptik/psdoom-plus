@@ -64,6 +64,12 @@ through the psdoom-ng hook, so nothing was actually killed.
 | ![DSDA-Doom](docs/screenshots/dsda.png) DSDA-Doom | ![GZDoom](docs/screenshots/gzdoom.png) GZDoom |
 | ![UZDoom](docs/screenshots/uzdoom.png) UZDoom | ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): three test TSRs and COMMAND.COM as monsters |
 
+On Haiku (R1/beta6), og in a window facing Haiku's own teams rather than a staged table:
+mount_server is a Demon (launch_daemon started it), media_addon_server, StyledEdit and MediaPlayer
+are zombiemen, and the Terminal behind lists them with `ps`.
+
+![Haiku desktop](docs/screenshots/haiku.png)
+
 Quake (shareware E1M1, the same process table): daemons are Fiends and user processes Grunts;
 the label shows while you look at one.
 

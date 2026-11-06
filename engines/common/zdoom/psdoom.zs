@@ -372,8 +372,6 @@ class PsdoomHandler : EventHandler
 	int LineUpAt(Actor shooter, Array<Actor> row, Vector2 c, double a, double d)
 	{
 		Vector2 p = c - Actor.AngleToVector(a, d);
-		if (!shooter.CheckPosition(p))
-			return -1;
 		int fit = 0, seen = 0;
 		Array<bool> solid, shootable;
 		for (int i = 0; i < row.Size(); i++)
@@ -383,30 +381,38 @@ class PsdoomHandler : EventHandler
 			shootable.Push(row[i].bShootable);
 			row[i].bSolid = row[i].bShootable = false;
 		}
-		shooter.bPickup = false;	// trying spots picks nothing up
-		for (int i = 0; i < row.Size(); i++)
+		if (shooter.CheckPosition(p))
 		{
-			int lat = row[0] is "PsdoomDemon" ? VIEW_LAT[i] : VIEW_LAT_EVEN[i];
-			Vector2 at = c + Actor.AngleToVector(a + 90, lat * d / 240);
-			if (row[i].CheckPosition(at) && row[i].TeleportMove((at.x, at.y, row[i].pos.z), false))
-				fit++;
-			row[i].SetZ(row[i].floorz);
-			row[i].angle = a + 180;
+			shooter.bPickup = false;	// trying spots picks nothing up
+			shooter.TeleportMove((p.x, p.y, shooter.pos.z), false);
+			shooter.SetZ(shooter.floorz);	// not falling into the picture
+			shooter.vel = (0, 0, 0);
+			shooter.player.viewz = shooter.pos.z + shooter.player.viewheight;
+			shooter.angle = a;
+			shooter.pitch = 0;
+			for (int i = 0; i < row.Size(); i++)
+			{
+				int lat = row[0] is "PsdoomDemon" ? VIEW_LAT[i] : VIEW_LAT_EVEN[i];
+				Vector2 at = c + Actor.AngleToVector(a + 90, lat * d / 240);
+				// a spot counts on the player's level only (the labels sit right)
+				if (row[i].CheckPosition(at) && row[i].TeleportMove((at.x, at.y, row[i].pos.z), false)
+				    && abs(row[i].floorz - shooter.pos.z) <= 8)
+					fit++;
+				row[i].SetZ(row[i].floorz);
+				row[i].angle = a + 180;
+			}
 		}
+		else
+			fit = -1;
 		for (int i = 0; i < row.Size(); i++)
 		{
 			row[i].bSolid = solid[i];
 			row[i].bShootable = shootable[i];
 		}
-		shooter.TeleportMove((p.x, p.y, shooter.pos.z), false);
-		shooter.SetZ(shooter.floorz);	// not falling into the picture
-		shooter.vel = (0, 0, 0);
-		shooter.player.viewz = shooter.pos.z + shooter.player.viewheight;
-		shooter.angle = a;
-		shooter.pitch = 0;
-		// seen, and on the player's level (the labels sit right)
+		if (fit < 0)
+			return -1;
 		for (int i = 0; i < row.Size(); i++)
-			if (shooter.CheckSight(row[i]) && abs(row[i].pos.z - shooter.pos.z) <= 24)
+			if (shooter.CheckSight(row[i]))
 				seen++;
 		return fit * 8 + seen;
 	}
@@ -441,29 +447,39 @@ class PsdoomHandler : EventHandler
 			{
 				mo.bInvisible = true;
 				mo.bSolid = mo.bShootable = false;
+				mo.tics = -1;	// and stop thinking about the player
 			}
 		}
 		double a0 = row[0].angle;
 		int best = -1, bestDir = 0, bestC = 0;
 		double bestD = 240;
+		// each spot also slid up to 128 units nearer or farther along the view
+		static const int SLIDE[] = { 0, 64, -64, 128, -128 };
+		int bestM = 0;
 		for (double d = 240; d >= 160; d -= 40)	// the farthest that works
 			for (int c = 0; c < cx.Size(); c++)
 				for (int k = 0; k < 16; k++)
-				{
-					int score = LineUpAt(shooter, row, (cx[c], cy[c]), a0 + k * 22.5, d);
-					if (score > best)
+					for (int m = 0; m < 5; m++)
 					{
-						best = score;
-						bestDir = k;
-						bestC = c;
-						bestD = d;
+						double a = a0 + k * 22.5;
+						Vector2 at = (cx[c], cy[c]) + Actor.AngleToVector(a, SLIDE[m]);
+						int score = LineUpAt(shooter, row, at, a, d);
+						if (score > best)
+						{
+							best = score;
+							bestDir = k;
+							bestC = c;
+							bestD = d;
+							bestM = m;
+						}
 					}
-				}
 		shooter.bPickup = true;
 		if (best < 0)
 			return false;
-		LineUpAt(shooter, row, (cx[bestC], cy[bestC]), a0 + bestDir * 22.5, bestD);
+		double ba = a0 + bestDir * 22.5;
+		LineUpAt(shooter, row, (cx[bestC], cy[bestC]) + Actor.AngleToVector(ba, SLIDE[bestM]), ba, bestD);
 		shooter.bPickup = true;
+		shooter.bInvulnerable = true;	// nothing spoils the picture (no god face)
 		for (int i = 0; i < row.Size(); i++)
 		{
 			row[i].SetState(row[i].SpawnState);

@@ -6,8 +6,15 @@
   user processes) across the view, with every label clear of the others, the weapon and the
   screen edges. The player is no longer caught mid-fall after being moved, which put the
   monsters low on screen. In the Doom engines, the DOS build and GZDoom/UZDoom.
-- **README:** new screenshots for every Doom engine and DOS, all 960x600, and a first one for
-  Chocolate Doom.
+  Placed monsters must stand on the player's floor, and the player can't be hurt while the
+  picture is up. `-pstesthold SECONDS` keeps it on screen for desktop screenshots (og,
+  Chocolate and Crispy; not yet in Woof!'s and DSDA-Doom's lists of psDooM options).
+- **`-pstest` on a crowded level:** in the Doom engines a test target now takes the place of a
+  process monster that isn't one when there's no room for it, as in Quake and Quake 3. On Haiku
+  in classic mode (every team is a monster) the second target could miss its spot, and the
+  modern run then shot the wrong `sleep`.
+- **README:** new screenshots for every Doom engine and DOS, all 960x600, a first one for
+  Chocolate Doom, and og on the Haiku desktop facing Haiku's own teams.
 
 ## 0.2.0 (2026-11-06)
 

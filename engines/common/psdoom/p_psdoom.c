@@ -79,6 +79,7 @@ static char*	test_glob;
 static char*	test_shot;
 static boolean	test_view;		// -pstestview: look at a pid monster first
 static int	test_finish_at;
+static int	test_hold;		// -pstesthold SECONDS: keep the picture up (desktop shots)
 static int	test_state;		// 0 off, 1 waiting for targets, 2 waiting for removal
 static int	test_deadline;		// leveltime
 static long	test_pids[64];
@@ -244,6 +245,32 @@ static void test_note_removed (long pid)
 	}
 }
 
+// -pstest: a target takes the place of a monster that isn't one, when the
+// level has no room for it (Haiku in classic mode shows every team, and an
+// idle target could wait forever). As in the Quake and Quake 3 glue.
+static boolean make_room (const psd_proc* p)
+{
+    int i;
+
+    if (!test_state || fnmatch (test_glob, p->comm, 0))
+	return false;
+    for (i = 0; i < nmons; i++)
+    {
+	const psd_proc*	q = psd_lookup (ctx, mons[i].pid);
+	mobj_t*		mo = mons[i].mo;
+	long		pid = mons[i].pid;
+
+	if (mo->health <= 0 || (q && !fnmatch (test_glob, q->comm, 0)))
+	    continue;
+	fprintf (stderr, "psdoom: %ld leaves for test target %ld\n", pid, p->pid);
+	drop_mon (&mons[i]);
+	vanish (mo);
+	psd_forget (ctx, pid);		// offered again later
+	return true;
+    }
+    return false;
+}
+
 static int on_event (void* user, psd_event ev, const psd_proc* p)
 {
     psmon_t*	m = find_mon (p->pid);
@@ -266,6 +293,8 @@ static int on_event (void* user, psd_event ev, const psd_proc* p)
 	if (m)				// stale entry from an earlier life
 	    drop_mon (m);
 	mo = spawn_process (p);
+	while (!mo && make_room (p))
+	    mo = spawn_process (p);
 	if (!mo)
 	    return 0;
 	add_mon (p->pid, mo);
@@ -413,6 +442,9 @@ void PS_Init (void)
 	if (p && p < myargc - 1)
 	    test_shot = myargv[p + 1];
 	test_view = M_CheckParm ("-pstestview") != 0;
+	p = M_CheckParm ("-pstesthold");
+	if (p && p < myargc - 1)
+	    test_hold = atoi (myargv[p + 1]) * 35;
     }
     if (poll_interval < 1)
 	poll_interval = 1;
@@ -535,43 +567,51 @@ static int line_up_at (mobj_t* shooter, mobj_t** row, int n, fixed_t cx, fixed_t
     int		i, fit = 0, seen = 0, flags[4];
     fixed_t	px = cx - d * finecosine[f], py = cy - d * finesine[f];
 
-    if (!P_CheckPosition (shooter, px, py))
-	return -1;
-    shooter->flags &= ~MF_PICKUP;		// trying spots picks nothing up
     // where they stood for the last try doesn't block this one
     for (i = 0; i < n; i++)
     {
 	flags[i] = row[i]->flags;
 	row[i]->flags &= ~(MF_SOLID | MF_SHOOTABLE);
     }
-    for (i = 0; i < n; i++)
+    if (P_CheckPosition (shooter, px, py))
     {
-	int	l = (row[0]->type == MT_SERGEANT ? ps_view_lat : ps_view_lat_even)[i] * d / 240;	// the same picture from nearer
-	fixed_t x = cx + l * finecosine[s], y = cy + l * finesine[s];
+	shooter->flags &= ~MF_PICKUP;		// trying spots picks nothing up
+	PSE_TeleportMove (shooter, px, py);
+	shooter->z = shooter->floorz;		// not falling into the picture
+	shooter->momz = 0;
+	if (shooter->player)
+	    shooter->player->viewz = shooter->z + shooter->player->viewheight;
+	shooter->angle = a;
+	for (i = 0; i < n; i++)
+	{
+	    int	l = (row[0]->type == MT_SERGEANT ? ps_view_lat : ps_view_lat_even)[i] * d / 240;	// the same picture from nearer
+	    fixed_t x = cx + l * finecosine[s], y = cy + l * finesine[s];
 
-	if (P_CheckPosition (row[i], x, y) && PSE_TeleportMove (row[i], x, y))
-	    fit++;
-	row[i]->z = row[i]->floorz;	// teleporting leaves z alone
-	row[i]->angle = a + ANG180;
+	    // a spot counts on the player's level only (the labels sit right)
+	    if (P_CheckPosition (row[i], x, y) && PSE_TeleportMove (row[i], x, y)
+		&& abs (row[i]->floorz - shooter->z) <= 8 * FRACUNIT)
+		fit++;
+	    row[i]->z = row[i]->floorz;	// teleporting leaves z alone
+	    row[i]->angle = a + ANG180;
+	}
     }
+    else
+	fit = -1;
     for (i = 0; i < n; i++)
 	row[i]->flags = flags[i];
-    PSE_TeleportMove (shooter, px, py);
-    shooter->z = shooter->floorz;	// not falling into the picture
-    shooter->momz = 0;
-    if (shooter->player)
-	shooter->player->viewz = shooter->z + shooter->player->viewheight;
-    shooter->angle = a;
-    // seen, and on the player's level (the labels sit right)
+    if (fit < 0)
+	return -1;
     for (i = 0; i < n; i++)
-	seen += P_CheckSight (shooter, row[i]) && abs (row[i]->z - shooter->z) <= 24 * FRACUNIT;
+	seen += P_CheckSight (shooter, row[i]) != 0;
     return fit * 8 + seen;
 }
 
 static boolean test_line_up (mobj_t* shooter)
 {
     mobj_t*		row[4];
-    int			n = 0, i, k, c, d, ncent = 0, score, best = -1, best_dir = 0, best_c = 0, best_d = 240;
+    static const int	slide[5] = { 0, 64, -64, 128, -128 };
+    int			n = 0, i, k, c, d, m, ncent = 0, score, best = -1;
+    int			best_dir = 0, best_c = 0, best_d = 240, best_m = 0;
     fixed_t		cent[64][2];
     angle_t		a0;
 
@@ -600,24 +640,41 @@ static boolean test_line_up (mobj_t* shooter)
 	for (k = 0; k < n && row[k] != mons[i].mo; k++)
 	    ;
 	if (k == n)
+	{
 	    P_UnsetThingPosition (mons[i].mo);
+	    mons[i].mo->tics = -1;		// and stop thinking about the player
+	}
     }
+    // each spot also slid up to 128 units nearer or farther along the view
     a0 = row[0]->angle;
     for (d = 240; d >= 160; d -= 40)		// the farthest that works
 	for (c = 0; c < ncent; c++)
 	    for (k = 0; k < 16; k++)
-		if ((score = line_up_at (shooter, row, n, cent[c][0], cent[c][1],
-					 a0 + (angle_t)k * (ANG45 / 2), d)) > best)
+		for (m = 0; m < 5; m++)
 		{
-		    best = score;
-		    best_dir = k;
-		    best_c = c;
-		    best_d = d;
+		    angle_t	a = a0 + (angle_t)k * (ANG45 / 2);
+		    int		f = a >> ANGLETOFINESHIFT, sl = slide[m];
+
+		    score = line_up_at (shooter, row, n, cent[c][0] + sl * finecosine[f],
+					cent[c][1] + sl * finesine[f], a, d);
+		    if (score > best)
+		    {
+			best = score;
+			best_dir = k;
+			best_c = c;
+			best_d = d;
+			best_m = m;
+		    }
 		}
     if (best < 0)
 	return false;
-    line_up_at (shooter, row, n, cent[best_c][0], cent[best_c][1],
-		a0 + (angle_t)best_dir * (ANG45 / 2), best_d);
+    {
+	angle_t	a = a0 + (angle_t)best_dir * (ANG45 / 2);
+	int	f = a >> ANGLETOFINESHIFT, sl = slide[best_m];
+
+	line_up_at (shooter, row, n, cent[best_c][0] + sl * finecosine[f],
+		    cent[best_c][1] + sl * finesine[f], a, best_d);
+    }
     shooter->flags |= MF_PICKUP;
     for (i = 0; i < n; i++)
     {
@@ -669,7 +726,7 @@ static void test_ticker (void)
 	    test_state = 3;
 	    test_finish_at = leveltime;
 	    if (test_view && test_line_up (shooter))
-		test_finish_at = leveltime + 4;
+		test_finish_at = leveltime + 4 + test_hold;
 	    else if (test_view)
 	    {
 		// stand 160 units from a living pid monster, facing it
@@ -682,7 +739,7 @@ static void test_ticker (void)
 			PSE_TeleportMove (shooter, x, y);
 			shooter->angle = R_PointToAngle2 (x, y, mo->x, mo->y);
 			mo->tics = -1;		// hold still for the picture
-			test_finish_at = leveltime + 4;
+			test_finish_at = leveltime + 4 + test_hold;
 			break;
 		    }
 	    }
@@ -717,6 +774,8 @@ void PS_Ticker (void)
 boolean PS_DamageAllowed (mobj_t* target, mobj_t* inflictor, mobj_t* source)
 {
     (void)inflictor;
+    if (test_state == 3 && target->player)
+	return false;			// -pstestview: nothing spoils the picture
     if (!target->ps_pid)
 	return true;
     if (target->ps_protected)
