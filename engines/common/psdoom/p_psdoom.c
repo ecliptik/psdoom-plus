@@ -519,6 +519,114 @@ static void test_finish (int code)
     exit (code);
 }
 
+// -pstestview: up to four living pid monsters (a daemon first) stand in a
+// row across the view, facing the player, so every label is clear of the
+// others, of the weapon and of the screen edges (where psDooM hides labels).
+// Of sixteen directions around the first one, the picture keeps the one where
+// most of them fit and can be seen. False if there is no living one.
+// units to the left of the middle, from 240 away: the daemon (wider, its label
+// starts further left) just right of the middle, two on the left, one on the right
+static const int	ps_view_lat[4] = { -60, 155, 54, -155 };
+static const int	ps_view_lat_even[4] = { -54, 155, 54, -155 };	// no daemon
+
+static int line_up_at (mobj_t* shooter, mobj_t** row, int n, fixed_t cx, fixed_t cy, angle_t a, int d)
+{
+    int		f = a >> ANGLETOFINESHIFT, s = (a + ANG90) >> ANGLETOFINESHIFT;
+    int		i, fit = 0, seen = 0, flags[4];
+    fixed_t	px = cx - d * finecosine[f], py = cy - d * finesine[f];
+
+    if (!P_CheckPosition (shooter, px, py))
+	return -1;
+    shooter->flags &= ~MF_PICKUP;		// trying spots picks nothing up
+    // where they stood for the last try doesn't block this one
+    for (i = 0; i < n; i++)
+    {
+	flags[i] = row[i]->flags;
+	row[i]->flags &= ~(MF_SOLID | MF_SHOOTABLE);
+    }
+    for (i = 0; i < n; i++)
+    {
+	int	l = (row[0]->type == MT_SERGEANT ? ps_view_lat : ps_view_lat_even)[i] * d / 240;	// the same picture from nearer
+	fixed_t x = cx + l * finecosine[s], y = cy + l * finesine[s];
+
+	if (P_CheckPosition (row[i], x, y) && PSE_TeleportMove (row[i], x, y))
+	    fit++;
+	row[i]->z = row[i]->floorz;	// teleporting leaves z alone
+	row[i]->angle = a + ANG180;
+    }
+    for (i = 0; i < n; i++)
+	row[i]->flags = flags[i];
+    PSE_TeleportMove (shooter, px, py);
+    shooter->z = shooter->floorz;	// not falling into the picture
+    shooter->momz = 0;
+    if (shooter->player)
+	shooter->player->viewz = shooter->z + shooter->player->viewheight;
+    shooter->angle = a;
+    // seen, and on the player's level (the labels sit right)
+    for (i = 0; i < n; i++)
+	seen += P_CheckSight (shooter, row[i]) && abs (row[i]->z - shooter->z) <= 24 * FRACUNIT;
+    return fit * 8 + seen;
+}
+
+static boolean test_line_up (mobj_t* shooter)
+{
+    mobj_t*		row[4];
+    int			n = 0, i, k, c, d, ncent = 0, score, best = -1, best_dir = 0, best_c = 0, best_d = 240;
+    fixed_t		cent[64][2];
+    angle_t		a0;
+
+    // one daemon, then user processes, then more daemons if that's all there is
+    for (k = 0; k < 3; k++)
+	for (i = 0; i < nmons && n < (k == 0 ? 1 : 4); i++)
+	{
+	    mobj_t* mo = mons[i].mo;
+	    boolean daemon = mo->type == MT_SERGEANT;
+
+	    if (mo->health > 0 && (k == 1 ? !daemon : daemon) && (k != 2 || mo != row[0]))
+		row[n++] = mo;
+	}
+    if (n == 0)
+	return false;
+    // any pid monster's spot may be the middle of the row
+    for (i = 0; i < nmons && ncent < 64; i++)
+	if (mons[i].mo->health > 0)
+	{
+	    cent[ncent][0] = mons[i].mo->x;
+	    cent[ncent++][1] = mons[i].mo->y;
+	}
+    // the other pid monsters leave the picture (the game ends after it)
+    for (i = 0; i < nmons; i++)
+    {
+	for (k = 0; k < n && row[k] != mons[i].mo; k++)
+	    ;
+	if (k == n)
+	    P_UnsetThingPosition (mons[i].mo);
+    }
+    a0 = row[0]->angle;
+    for (d = 240; d >= 160; d -= 40)		// the farthest that works
+	for (c = 0; c < ncent; c++)
+	    for (k = 0; k < 16; k++)
+		if ((score = line_up_at (shooter, row, n, cent[c][0], cent[c][1],
+					 a0 + (angle_t)k * (ANG45 / 2), d)) > best)
+		{
+		    best = score;
+		    best_dir = k;
+		    best_c = c;
+		    best_d = d;
+		}
+    if (best < 0)
+	return false;
+    line_up_at (shooter, row, n, cent[best_c][0], cent[best_c][1],
+		a0 + (angle_t)best_dir * (ANG45 / 2), best_d);
+    shooter->flags |= MF_PICKUP;
+    for (i = 0; i < n; i++)
+    {
+	P_SetMobjState (row[i], row[i]->info->spawnstate);
+	row[i]->tics = -1;		// hold still for the picture
+    }
+    return true;
+}
+
 static void test_ticker (void)
 {
     mobj_t*	shooter = players[consoleplayer].mo;
@@ -560,7 +668,9 @@ static void test_ticker (void)
 	{
 	    test_state = 3;
 	    test_finish_at = leveltime;
-	    if (test_view)
+	    if (test_view && test_line_up (shooter))
+		test_finish_at = leveltime + 4;
+	    else if (test_view)
 	    {
 		// stand 160 units from a living pid monster, facing it
 		for (i = 0; i < nmons; i++)

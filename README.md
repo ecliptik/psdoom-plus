@@ -52,16 +52,17 @@ PSDOOM_NET_TOKEN=<secret> build/og/psdoom-og -psnet 192.168.1.10:6666
 
 ## Screenshots
 
-Shareware Doom's E1M1, each engine facing the same process table: postgres is a Demon (a
-daemon), htop, mutt, python3 and nginx are zombiemen, and the label is the pid and the name.
-(The process table is staged through the psdoom-ng hook, so nothing was actually killed.)
+Shareware Doom's E1M1, each engine facing the same process table: nginx is a Demon (a daemon),
+firefox, vim and python3 are zombiemen. As in psDooM, a label is the pid over the last 7
+characters of the command (`/usr/bin/vim` shows as `BIN/VIM`). The process table is staged
+through the psdoom-ng hook, so nothing was actually killed.
 
 | | |
 |---|---|
-| ![og](docs/screenshots/og.png) og (id's linuxdoom-1.10 on SDL3) | ![Crispy Doom](docs/screenshots/crispy.png) Crispy Doom |
-| ![Woof!](docs/screenshots/woof.png) Woof! | ![DSDA-Doom](docs/screenshots/dsda.png) DSDA-Doom |
-| ![GZDoom](docs/screenshots/gzdoom.png) GZDoom | ![UZDoom](docs/screenshots/uzdoom.png) UZDoom |
-| ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): COMMAND.COM and PSDOOM itself, both protected in modern mode | |
+| ![og](docs/screenshots/og.png) og (id's linuxdoom-1.10 on SDL3) | ![Chocolate Doom](docs/screenshots/chocolate.png) Chocolate Doom |
+| ![Crispy Doom](docs/screenshots/crispy.png) Crispy Doom | ![Woof!](docs/screenshots/woof.png) Woof! |
+| ![DSDA-Doom](docs/screenshots/dsda.png) DSDA-Doom | ![GZDoom](docs/screenshots/gzdoom.png) GZDoom |
+| ![UZDoom](docs/screenshots/uzdoom.png) UZDoom | ![MS-DOS](docs/screenshots/dos.png) MS-DOS (DOSBox-X): three test TSRs and COMMAND.COM as monsters |
 
 Quake (shareware E1M1, the same process table): daemons are Fiends and user processes Grunts;
 the label shows while you look at one.

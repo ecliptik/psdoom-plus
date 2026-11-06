@@ -332,17 +332,18 @@ class PsdoomHandler : EventHandler
 		{
 			if ((removed >= targeted && level.maptime > 35 * 4) || level.maptime >= testDeadline)
 			{
-				// look at a living pid monster for the screenshot
-				for (int i = 0; i < mons.Size(); i++)
-					if (mons[i].health > 0)
-					{
-						Actor mo = mons[i];
-						Vector2 at = mo.pos.xy - Actor.AngleToVector(mo.angle, 160);
-						shooter.SetOrigin((at.x, at.y, shooter.pos.z), false);
-						shooter.angle = shooter.AngleTo(mo);
-						shooter.player.cheats |= CF_NOTARGET;
-						break;
-					}
+				// the picture: pid monsters in a row, or failing that one of them
+				if (!LineUp(shooter))
+					for (int i = 0; i < mons.Size(); i++)
+						if (mons[i].health > 0)
+						{
+							Actor mo = mons[i];
+							Vector2 at = mo.pos.xy - Actor.AngleToVector(mo.angle, 160);
+							shooter.SetOrigin((at.x, at.y, shooter.pos.z), false);
+							shooter.angle = shooter.AngleTo(mo);
+							break;
+						}
+				shooter.player.cheats |= CF_NOTARGET;
 				testState = 2;
 				testFinishAt = level.maptime + 8;
 			}
@@ -360,6 +361,117 @@ class PsdoomHandler : EventHandler
 		}
 	}
 
+	// -pstestview: up to four living pid monsters (a daemon first) stand in a
+	// row across the view, facing the player, so every label is clear of the
+	// others, of the weapon and of the screen edges. As test_line_up in
+	// engines/common/psdoom/p_psdoom.c: units left of the middle from 240
+	// away, the daemon (wider) just right of the middle.
+	static const int VIEW_LAT[] = { -60, 155, 54, -155 };
+	static const int VIEW_LAT_EVEN[] = { -54, 155, 54, -155 };	// no daemon
+
+	int LineUpAt(Actor shooter, Array<Actor> row, Vector2 c, double a, double d)
+	{
+		Vector2 p = c - Actor.AngleToVector(a, d);
+		if (!shooter.CheckPosition(p))
+			return -1;
+		int fit = 0, seen = 0;
+		Array<bool> solid, shootable;
+		for (int i = 0; i < row.Size(); i++)
+		{
+			// where they stood for the last try doesn't block this one
+			solid.Push(row[i].bSolid);
+			shootable.Push(row[i].bShootable);
+			row[i].bSolid = row[i].bShootable = false;
+		}
+		shooter.bPickup = false;	// trying spots picks nothing up
+		for (int i = 0; i < row.Size(); i++)
+		{
+			int lat = row[0] is "PsdoomDemon" ? VIEW_LAT[i] : VIEW_LAT_EVEN[i];
+			Vector2 at = c + Actor.AngleToVector(a + 90, lat * d / 240);
+			if (row[i].CheckPosition(at) && row[i].TeleportMove((at.x, at.y, row[i].pos.z), false))
+				fit++;
+			row[i].SetZ(row[i].floorz);
+			row[i].angle = a + 180;
+		}
+		for (int i = 0; i < row.Size(); i++)
+		{
+			row[i].bSolid = solid[i];
+			row[i].bShootable = shootable[i];
+		}
+		shooter.TeleportMove((p.x, p.y, shooter.pos.z), false);
+		shooter.SetZ(shooter.floorz);	// not falling into the picture
+		shooter.vel = (0, 0, 0);
+		shooter.player.viewz = shooter.pos.z + shooter.player.viewheight;
+		shooter.angle = a;
+		shooter.pitch = 0;
+		// seen, and on the player's level (the labels sit right)
+		for (int i = 0; i < row.Size(); i++)
+			if (shooter.CheckSight(row[i]) && abs(row[i].pos.z - shooter.pos.z) <= 24)
+				seen++;
+		return fit * 8 + seen;
+	}
+
+	bool LineUp(Actor shooter)
+	{
+		Array<Actor> row;
+		Array<double> cx, cy;
+		// one daemon, then user processes, then more daemons if that's all there is
+		for (int k = 0; k < 3; k++)
+			for (int i = 0; i < mons.Size() && row.Size() < (k == 0 ? 1 : 4); i++)
+			{
+				Actor mo = mons[i];
+				if (!mo || mo.health <= 0)
+					continue;
+				bool daemon = mo is "PsdoomDemon";
+				if ((k == 1 ? !daemon : daemon) && (k != 2 || mo != row[0]))
+					row.Push(mo);
+			}
+		if (row.Size() == 0)
+			return false;
+		// any pid monster's spot may be the middle of the row; the others
+		// leave the picture (the game ends after it)
+		for (int i = 0; i < mons.Size(); i++)
+		{
+			Actor mo = mons[i];
+			if (!mo || mo.health <= 0)
+				continue;
+			cx.Push(mo.pos.x);
+			cy.Push(mo.pos.y);
+			if (row.Find(mo) == row.Size())
+			{
+				mo.bInvisible = true;
+				mo.bSolid = mo.bShootable = false;
+			}
+		}
+		double a0 = row[0].angle;
+		int best = -1, bestDir = 0, bestC = 0;
+		double bestD = 240;
+		for (double d = 240; d >= 160; d -= 40)	// the farthest that works
+			for (int c = 0; c < cx.Size(); c++)
+				for (int k = 0; k < 16; k++)
+				{
+					int score = LineUpAt(shooter, row, (cx[c], cy[c]), a0 + k * 22.5, d);
+					if (score > best)
+					{
+						best = score;
+						bestDir = k;
+						bestC = c;
+						bestD = d;
+					}
+				}
+		shooter.bPickup = true;
+		if (best < 0)
+			return false;
+		LineUpAt(shooter, row, (cx[bestC], cy[bestC]), a0 + bestDir * 22.5, bestD);
+		shooter.bPickup = true;
+		for (int i = 0; i < row.Size(); i++)
+		{
+			row[i].SetState(row[i].SpawnState);
+			row[i].tics = -1;	// hold still for the picture
+		}
+		return true;
+	}
+
 	// psDooM's floating "pid / name" label, over monsters in plain sight
 	override void RenderOverlay(RenderEvent e)
 	{
@@ -371,7 +483,7 @@ class PsdoomHandler : EventHandler
 		double c = cos(e.ViewAngle), s = sin(e.ViewAngle);
 		for (int i = 0; i < mons.Size(); i++)
 		{
-			if (!seen[i] || !mons[i])
+			if (!seen[i] || !mons[i] || mons[i].bInvisible)
 				continue;
 			Actor mo = mons[i];
 			Vector3 rel = mo.Prev + (mo.pos - mo.Prev) * e.FracTic + (0, 0, mo.height) - e.ViewPos;

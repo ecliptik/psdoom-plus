@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **`-pstestview`:** the closing picture lines up to four process monsters (a daemon and three
+  user processes) across the view, with every label clear of the others, the weapon and the
+  screen edges. The player is no longer caught mid-fall after being moved, which put the
+  monsters low on screen. In the Doom engines, the DOS build and GZDoom/UZDoom.
+- **README:** new screenshots for every Doom engine and DOS, all 960x600, and a first one for
+  Chocolate Doom.
+
 ## 0.2.0 (2026-11-06)
 
 Quake and Quake 3 join the Doom engines: processes are Quake monsters, or Quake 3 bots named
