@@ -3,6 +3,8 @@
 A remake of [psDooM](https://psdoom.sourceforge.net), the Doom-based process manager, for current
 Linux, BSD and Haiku systems and for modern Doom source ports.
 
+This project is being built agentically using [Claude Code](https://claude.com/claude-code).
+
 In psDooM every running process is a monster. Shooting one lowers its priority (`renice`);
 killing it kills the process. psdoom-plus brings that back on top of current engines:
 
